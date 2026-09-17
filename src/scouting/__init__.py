@@ -1,0 +1,1 @@
+"""Scouting platform core package."""

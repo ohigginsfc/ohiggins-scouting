@@ -1,0 +1,125 @@
+name: scouting-platform
+
+# Una sola fuente de verdad: interpolación de Compose (shell o .env del proyecto).
+# No mezclar env_file para credenciales con ${DB_PASSWORD} en otros servicios.
+x-database-environment: &database-environment
+  DB_HOST: ${DB_HOST:?DB_HOST requerido}
+  DB_PORT: ${DB_PORT:?DB_PORT requerido}
+  DB_NAME: ${DB_NAME:?DB_NAME requerido}
+  DB_USER: ${DB_USER:?DB_USER requerido}
+  DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD requerido}
+
+x-app-runtime-environment: &app-runtime-environment
+  <<: *database-environment
+  SOFASCORE_ACTIVE_SEASON: ${SOFASCORE_ACTIVE_SEASON:-2025}
+  SOFASCORE_HISTORICAL_SEASON: ${SOFASCORE_HISTORICAL_SEASON:-2024}
+  SCOUTING_USERNAME: ${SCOUTING_USERNAME:?SCOUTING_USERNAME requerido}
+  SCOUTING_PASSWORD_HASH: ${SCOUTING_PASSWORD_HASH:?SCOUTING_PASSWORD_HASH requerido}
+  SCOUTING_DEBUG_MODE: ${SCOUTING_DEBUG_MODE:-0}
+  SHOW_ADMIN_TAB: ${SHOW_ADMIN_TAB:-0}
+  DISABLE_SOFASCORE_UPDATE: ${DISABLE_SOFASCORE_UPDATE:-0}
+  SHOW_SYNC_TECHNICAL_DETAILS: ${SHOW_SYNC_TECHNICAL_DETAILS:-0}
+  HOST_PROJECT_ROOT: ${HOST_PROJECT_ROOT:-}
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: scouting_postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:?DB_NAME requerido}
+      POSTGRES_USER: ${DB_USER:?DB_USER requerido}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD requerido}
+    ports:
+      - "5432:5432"
+    volumes:
+      - scouting_postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  db-init:
+    build: .
+    container_name: scouting_db_init
+    environment:
+      <<: *database-environment
+      PYTHONPATH: /app/src
+    volumes:
+      - ${HOST_PROJECT_ROOT:-${PROJECT_ROOT:-.}}:/app
+    working_dir: /app
+    command: ["python", "scripts/init_database.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build: .
+    container_name: scouting_streamlit
+    ports:
+      - "8501:8501"
+    volumes:
+      - ${HOST_PROJECT_ROOT:-${PROJECT_ROOT:-.}}:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      <<: *app-runtime-environment
+      PYTHONPATH: /app/src
+      COMPOSE_PROJECT_NAME: scouting-platform
+      COMPOSE_FILE: /app/docker-compose.yml
+      PROJECT_ROOT: /app
+      CHROME_BINARY: /usr/bin/chromium
+      CHROMEDRIVER_PATH: /usr/bin/chromedriver
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+
+  sofascore-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.scraper
+    profiles: ["worker"]
+    environment:
+      <<: *database-environment
+      PYTHONPATH: /app/src
+      SOFASCORE_IMPORT_MODE: direct
+      SOFASCORE_ACTIVE_SEASON: ${SOFASCORE_ACTIVE_SEASON:-2025}
+      SOFASCORE_HISTORICAL_SEASON: ${SOFASCORE_HISTORICAL_SEASON:-2024}
+      CHROME_BINARY: /usr/bin/chromium
+      CHROMEDRIVER_PATH: /usr/bin/chromedriver
+    volumes:
+      - ${HOST_PROJECT_ROOT:-${PROJECT_ROOT:-.}}:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    working_dir: /app
+
+  # Suite de tests (no arranca con `docker compose up`).
+  # Uso: docker compose --profile test run --rm --build test
+  test:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.test
+    working_dir: /app
+    environment:
+      <<: *database-environment
+      PYTHONPATH: /app/src
+    volumes:
+      - ${HOST_PROJECT_ROOT:-${PROJECT_ROOT:-.}}:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "pytest", "-q"]
+
+volumes:
+  scouting_postgres_data:

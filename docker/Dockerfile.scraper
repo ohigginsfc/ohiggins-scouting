@@ -1,0 +1,37 @@
+FROM python:3.11-slim-bookworm
+
+WORKDIR /app
+
+# A) Chromium + ChromeDriver (Debian Bookworm)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        chromium \
+        chromium-driver \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CHROME_BINARY=/usr/bin/chromium
+ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
+ENV CHROME_BIN=/usr/bin/chromium
+ENV PYTHONPATH=/app/src
+ENV SOFASCORE_IMPORT_MODE=direct
+
+# B) Copiar requirements (app + scraper)
+COPY requirements.txt /app/requirements.txt
+COPY web_scraping_sofascore/requirements-scraper.txt /app/requirements-scraper.txt
+
+# C) Verificar Selenium en ambos ficheros
+RUN grep -n "selenium" /app/requirements.txt \
+    && grep -n "selenium" /app/requirements-scraper.txt
+
+# D) Instalar dependencias
+RUN python -m pip install --no-cache-dir -r /app/requirements.txt \
+    && python -m pip install --no-cache-dir -r /app/requirements-scraper.txt
+
+# E) Validar
+RUN chromium --version \
+    && chromedriver --version \
+    && python -c "import selenium; print('Selenium', selenium.__version__)"
+
+COPY . .
+
+CMD ["sleep", "infinity"]

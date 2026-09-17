@@ -1,0 +1,62 @@
+# Git y metadatos
+.git
+.gitignore
+.gitattributes
+.github
+
+# Secretos y entornos
+.env
+.env.*
+!.env.example
+.venv
+venv
+env
+
+# Cachés y artefactos Python
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+*.egg-info
+dist
+build
+
+# Logs y dumps
+*.log
+build_*.log
+*.dump
+*.backup
+*.sql.gz
+backup_before_*.sql
+scouting_db.dump
+
+# Datos generados / runtime (no necesarios en la imagen)
+data/backups
+data/logs
+data/runtime
+data/staging
+data/cache
+data/raw
+data/processed
+
+# Salida y depuración del scraper
+web_scraping_sofascore/sofascore_output
+web_scraping_sofascore/debug_sofascore
+**/checkpoint_raw.json
+**/_backup_reagg_*
+**/chrome_profile*
+**/chromium_profile*
+**/selenium_cache
+
+# IDE / editor
+.idea
+.vscode
+.cursor
+*.swp
+.DS_Store
+
+# Documentación pesada opcional (la app no la necesita en runtime)
+# Conservamos docs/ por si se monta el repo; no es crítico excluirlo.
