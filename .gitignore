@@ -95,3 +95,5 @@ web_scraping_sofascore/debug_sofascore/**
 docker-compose.init-test.yml
 docker-compose.override.yml
 docker-compose.audit-clean.yml
+
+.local_checks/

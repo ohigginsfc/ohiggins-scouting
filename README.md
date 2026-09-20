@@ -104,3 +104,10 @@ docker compose --profile worker build sofascore-worker
 docker compose --profile worker run --rm sofascore-worker \
   python scripts/test_selenium_runtime.py
 ```
+
+## Pruebas de integridad de importación
+
+Consultar [atomicidad y validación PostgreSQL](docs/atomic-import-review.md) para
+ejecutar los escenarios de fallo y revisar el alcance de la protección del
+importador. La integración requiere una base local desechable explícita; las
+pruebas no utilizan las credenciales de producción.

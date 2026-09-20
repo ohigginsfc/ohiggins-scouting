@@ -46,7 +46,7 @@ def create_import_batch(
     return UUID(str(batch_id))
 
 
-def complete_import_batch(conn: Connection, batch_id: UUID, stats: dict[str, Any] | None = None) -> None:
+def complete_import_batch(conn: Connection, batch_id: UUID, stats: dict[str, Any] | None = None, *, commit: bool = True) -> None:
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -56,7 +56,8 @@ def complete_import_batch(conn: Connection, batch_id: UUID, stats: dict[str, Any
             """,
             (Json(stats) if stats is not None else None, str(batch_id)),
         )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def fail_import_batch(conn: Connection, batch_id: UUID, stats: dict[str, Any] | None = None) -> None:
@@ -80,6 +81,7 @@ def list_batch_ids_for_scope(
     division: str,
     season: str,
     exclude_batch_id: UUID | None = None,
+    competition: str | None = None,
 ) -> list[UUID]:
     clauses = [
         "provider = %s",
@@ -89,6 +91,9 @@ def list_batch_ids_for_scope(
         "status IN ('completed', 'replaced')",
     ]
     params: list[Any] = [provider, country, division, season]
+    if competition is not None:
+        clauses.append("competition = %s")
+        params.append(competition)
     if exclude_batch_id is not None:
         clauses.append("id <> %s")
         params.append(str(exclude_batch_id))
@@ -112,6 +117,8 @@ def mark_previous_batches_replaced(
     division: str,
     season: str,
     current_batch_id: UUID,
+    competition: str | None = None,
+    commit: bool = True,
 ) -> int:
     with conn.cursor() as cur:
         cur.execute(
@@ -120,11 +127,13 @@ def mark_previous_batches_replaced(
             SET status = 'replaced'
             WHERE provider = %s AND country = %s AND division = %s AND season = %s
               AND id <> %s AND status = 'completed'
+              AND (%s::text IS NULL OR competition = %s)
             """,
-            (provider, country, division, season, str(current_batch_id)),
+            (provider, country, division, season, str(current_batch_id), competition, competition),
         )
         n = cur.rowcount
-    conn.commit()
+    if commit:
+        conn.commit()
     return int(n)
 
 

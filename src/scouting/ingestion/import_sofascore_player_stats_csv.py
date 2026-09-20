@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any
 from uuid import UUID
 
 import pandas as pd
+from psycopg.pq import TransactionStatus
 
 from scouting.db import get_connection
 from scouting.repositories import (
@@ -59,7 +61,7 @@ def _resolve_player_id(
         pid = int(existing["id"])
         stats["players_matched_name"] = stats.get("players_matched_name", 0) + 1
         player_external_ids_repository.create_or_update_external_id(
-            conn, pid, PROVIDER, external_id, external_name=player_name
+            conn, pid, PROVIDER, external_id, external_name=player_name, commit=False
         )
         return pid, False
 
@@ -71,6 +73,7 @@ def _resolve_player_id(
         nationality=profile.get("nationality"),
         preferred_foot=profile.get("preferred_foot"),
         height_cm=profile.get("height_cm"),
+        commit=False,
     )
     if created:
         stats["players_created"] = stats.get("players_created", 0) + 1
@@ -78,7 +81,7 @@ def _resolve_player_id(
         stats["players_reused"] = stats.get("players_reused", 0) + 1
 
     player_external_ids_repository.create_or_update_external_id(
-        conn, pid, PROVIDER, external_id, external_name=player_name
+        conn, pid, PROVIDER, external_id, external_name=player_name, commit=False
     )
     return pid, created
 
@@ -97,6 +100,7 @@ def _apply_profile_merge(
         birth_date=profile.get("birth_date"),
         preferred_foot=profile.get("preferred_foot"),
         height_cm=profile.get("height_cm"),
+        commit=False,
         nationality=profile.get("nationality"),
     )
 
@@ -117,6 +121,8 @@ def _replace_previous_data(
         division=division,
         season=season,
         current_batch_id=batch_id,
+        competition=competition,
+        commit=False,
     )
     old_ids = import_batches_repository.list_batch_ids_for_scope(
         conn,
@@ -125,14 +131,90 @@ def _replace_previous_data(
         division=division,
         season=season,
         exclude_batch_id=batch_id,
-    )
-    metrics_repository.delete_metrics_by_batch_ids(conn, old_ids)
-    metrics_repository.delete_metrics_by_source_scope(
-        conn,
-        source_name=SOURCE_NAME,
-        season=season,
         competition=competition,
     )
+    metrics_repository.delete_metrics_by_batch_ids(conn, old_ids, commit=False)
+
+
+def import_dataframe(
+    conn, df: pd.DataFrame, *, country: str, division: str, season: str,
+    competition: str, source_file: str, replace: bool = False,
+    teams_lookup: dict[str, str] | None = None,
+) -> tuple[UUID, dict[str, Any]]:
+    """Publish the complete CSV atomically; retain the previous version on any error.
+
+    Requires a fresh connection with no caller-owned transaction. The running/failed
+    batch record is durable, but all player, identity and metric changes roll back.
+    """
+    if conn.info.transaction_status != TransactionStatus.IDLE:
+        raise ValueError("Import requires a connection without an active transaction")
+    if df.empty:
+        raise ValueError("Empty CSV cannot replace a published version")
+    if not all(str(x).strip() for x in (country, division, season, competition)):
+        raise ValueError("Import scope must be complete")
+    run_stats: dict[str, Any] = {
+        "rows_total": len(df),
+        "players_created": 0,
+        "players_reused": 0,
+        "players_matched_external": 0,
+        "players_matched_name": 0,
+        "metrics_inserted": 0,
+        "row_errors": [],
+    }
+
+    batch_id = import_batches_repository.create_import_batch(
+        conn, provider=PROVIDER, country=country, division=division,
+        competition=competition, season=season, source_file=source_file,
+        scraped_at=datetime.now(timezone.utc),
+    )
+    try:
+        with conn.transaction():
+            # Serialise publications of the same exact scope across processes.
+            scope = json.dumps([PROVIDER, country, division, season, competition])
+            conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (scope,))
+            if replace:
+                # Legacy rows cannot safely be attributed to country/division.
+                legacy = conn.execute(
+                    """SELECT 1 FROM objective_metrics
+                       WHERE source_name = %s AND season = %s AND competition = %s
+                         AND import_batch_id IS NULL AND source_type = 'sofascore'
+                       LIMIT 1""", (SOURCE_NAME, season, competition),
+                ).fetchone()
+                if legacy:
+                    raise ValueError("Unbatched Sofascore metrics require explicit reconciliation before replacement")
+            metric_buffer = []
+            for idx, row in df.iterrows():
+                try:
+                    player_id, _ = _resolve_player_id(conn, row, stats=run_stats, teams_lookup=teams_lookup)
+                    _apply_profile_merge(conn, player_id, row, teams_lookup=teams_lookup)
+                    metrics = convert_row_to_metrics(row, season=season, competition=competition, teams_lookup=teams_lookup)
+                    if not metrics:
+                        raise ValueError("Row produced no metrics")
+                    for metric in metrics:
+                        metric.update(player_id=player_id, import_batch_id=batch_id, source_type="sofascore")
+                        metric_buffer.append(metric)
+                    if len(metric_buffer) >= 500:
+                        run_stats["metrics_inserted"] += metrics_repository.create_metrics_batch(conn, metric_buffer, commit=False)
+                        metric_buffer.clear()
+                except Exception as exc:
+                    run_stats["row_errors"].append(f"row index {idx}: {type(exc).__name__}")
+                    raise ValueError(f"Import aborted at row index {idx}; previous data retained") from exc
+            if metric_buffer:
+                run_stats["metrics_inserted"] += metrics_repository.create_metrics_batch(conn, metric_buffer, commit=False)
+            if run_stats["metrics_inserted"] == 0:
+                raise ValueError("CSV produced no metrics; previous data retained")
+            # The candidate is complete but invisible outside this transaction.
+            if replace:
+                _replace_previous_data(conn, batch_id=batch_id, country=country,
+                                       division=division, season=season, competition=competition)
+            import_batches_repository.complete_import_batch(conn, batch_id, run_stats, commit=False)
+    except Exception as exc:
+        run_stats["metrics_attempted"] = run_stats["metrics_inserted"]
+        run_stats["metrics_inserted"] = 0
+        run_stats["rolled_back"] = True
+        import_batches_repository.fail_import_batch(conn, batch_id, {"error_type": type(exc).__name__, **run_stats})
+        raise
+    return batch_id, run_stats
 
 
 def main() -> None:
@@ -145,7 +227,7 @@ def main() -> None:
     parser.add_argument(
         "--replace",
         action="store_true",
-        help="Replace previous Sofascore metrics for this country/division/season",
+        help="Atomically replace previous metrics for this country/division/competition/season",
     )
     args = parser.parse_args()
 
@@ -166,80 +248,12 @@ def main() -> None:
     competition = str(args.competition).strip()
     teams_lookup = load_teams_lookup(csv_path)
 
-    run_stats: dict[str, Any] = {
-        "rows_total": len(df),
-        "players_created": 0,
-        "players_reused": 0,
-        "players_matched_external": 0,
-        "players_matched_name": 0,
-        "metrics_inserted": 0,
-        "row_errors": [],
-    }
-
     with get_connection() as conn:
-        batch_id = import_batches_repository.create_import_batch(
-            conn,
-            provider=PROVIDER,
-            country=country,
-            division=division,
-            competition=competition,
-            season=season,
-            source_file=str(csv_path.resolve()),
-            scraped_at=datetime.now(timezone.utc),
+        batch_id, run_stats = import_dataframe(
+            conn, df, country=country, division=division, season=season,
+            competition=competition, source_file=str(csv_path.resolve()),
+            replace=args.replace, teams_lookup=teams_lookup,
         )
-
-        try:
-            if args.replace:
-                _replace_previous_data(
-                    conn,
-                    batch_id=batch_id,
-                    country=country,
-                    division=division,
-                    season=season,
-                    competition=competition,
-                )
-
-            metric_buffer: list[dict[str, Any]] = []
-            batch_size = 500
-
-            for idx, row in df.iterrows():
-                label = f"row index {idx}"
-                try:
-                    player_id, _ = _resolve_player_id(
-                        conn, row, stats=run_stats, teams_lookup=teams_lookup
-                    )
-                    _apply_profile_merge(
-                        conn, player_id, row, teams_lookup=teams_lookup
-                    )
-
-                    for metric in convert_row_to_metrics(
-                        row,
-                        season=season,
-                        competition=competition,
-                        teams_lookup=teams_lookup,
-                    ):
-                        metric["player_id"] = player_id
-                        metric["import_batch_id"] = batch_id
-                        metric["source_type"] = "sofascore"
-                        metric_buffer.append(metric)
-
-                    if len(metric_buffer) >= batch_size:
-                        n = metrics_repository.create_metrics_batch(conn, metric_buffer)
-                        run_stats["metrics_inserted"] += n
-                        metric_buffer.clear()
-
-                except Exception as exc:  # noqa: BLE001
-                    run_stats["row_errors"].append(f"{label}: {exc}")
-
-            if metric_buffer:
-                n = metrics_repository.create_metrics_batch(conn, metric_buffer)
-                run_stats["metrics_inserted"] += n
-
-            import_batches_repository.complete_import_batch(conn, batch_id, run_stats)
-
-        except Exception as exc:  # noqa: BLE001
-            import_batches_repository.fail_import_batch(conn, batch_id, {"error": str(exc), **run_stats})
-            raise
 
     print(f"Import batch: {batch_id}")
     print(f"Rows in CSV: {run_stats['rows_total']}")
@@ -247,13 +261,7 @@ def main() -> None:
     print(f"Players created: {run_stats['players_created']}")
     print(f"Matched by external_id: {run_stats['players_matched_external']}")
     print(f"Matched by name: {run_stats['players_matched_name']}")
-    if run_stats["row_errors"]:
-        print("Row errors:")
-        for err in run_stats["row_errors"][:20]:
-            print(f"  - {err}")
-        if len(run_stats["row_errors"]) > 20:
-            print(f"  ... and {len(run_stats['row_errors']) - 20} more")
-        sys.exit(2)
+
 
 
 if __name__ == "__main__":
