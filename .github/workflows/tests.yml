@@ -35,4 +35,16 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: python -m pip install -r requirements-dev.txt
+      - name: Configure synthetic Compose test environment
+        run: |
+          cat > .env <<'EOF'
+          DB_HOST=postgres
+          DB_PORT=5432
+          DB_NAME=scouting_test
+          DB_USER=scouting_test
+          DB_PASSWORD=synthetic-compose-password
+          SCOUTING_USERNAME=synthetic
+          SCOUTING_PASSWORD_HASH=$$2b$$12$$testhashforcomposeinterpolationonlyxx
+          DISABLE_SOFASCORE_UPDATE=1
+          EOF
       - run: python -m pytest -q
