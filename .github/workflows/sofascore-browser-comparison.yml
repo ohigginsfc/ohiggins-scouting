@@ -1,0 +1,46 @@
+name: Sofascore browser configuration comparison
+on:
+  workflow_dispatch:
+  push:
+    branches: [diagnostic/sofascore-browser-comparison]
+    paths:
+      - scripts/compare_sofascore_browsers.py
+      - .github/workflows/sofascore-browser-comparison.yml
+permissions:
+  contents: read
+concurrency:
+  group: sofascore-browser-comparison
+  cancel-in-progress: false
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Retrieve original builder source
+        run: |
+          mkdir -p data/recovery/comparison
+          git show cbe7121d9933e62b088ec608bd45700e1dcddcd7:web_scraping_sofascore/sofascore_scraper.py > data/recovery/comparison/original.py
+      - name: Build shared runtime
+        run: docker build -f docker/Dockerfile.scraper -t sofascore-comparison .
+      - name: Compare original and current browsers
+        run: |
+          docker run --rm -v "$PWD/data/recovery/comparison:/comparison" sofascore-comparison \
+            python scripts/compare_sofascore_browsers.py --original-source /comparison/original.py --output /comparison/report.json
+      - name: Report results
+        if: always()
+        run: |
+          if [ -f data/recovery/comparison/report.json ]; then
+            echo '### Browser comparison (diagnostic, not a season sync)' >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat data/recovery/comparison/report.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-comparison-report
+          path: data/recovery/comparison/report.json
+          retention-days: 7
