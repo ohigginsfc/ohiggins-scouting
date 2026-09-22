@@ -202,3 +202,38 @@ def test_backup_failure_prevents_import(monkeypatch, tmp_path):
          patch.object(cli.subprocess,'run',side_effect=RuntimeError('backup failed')):
         with pytest.raises(RuntimeError): cli.apply_local(r.pack(complete_state()),pg_dump='pg_dump')
     connect.assert_not_called()
+
+
+def test_checkpoint_download_rejects_pull_request_runs(monkeypatch, tmp_path):
+    monkeypatch.syspath_prepend(str(r.ROOT/'scripts'))
+    import sofascore_recovery as cli
+    run={'head_branch':'main','event':'pull_request','path':'.github/workflows/sofascore-recovery.yml','id':1}
+    with patch.object(cli,'gh_api',return_value=run),patch.object(cli.subprocess,'run') as download:
+        with pytest.raises(r.InvalidPackage,match='No compatible'):
+            cli.download_checkpoint('1','2024',tmp_path/'input.sofa')
+    download.assert_not_called()
+
+
+def test_expired_checkpoint_does_not_restart_download(monkeypatch, tmp_path):
+    monkeypatch.syspath_prepend(str(r.ROOT/'scripts'))
+    import sofascore_recovery as cli
+    run={'head_branch':'main','event':'workflow_dispatch','path':'.github/workflows/sofascore-recovery.yml','id':1}
+    artifact={'name':'sofascore-recovery-2024-collect','expired':True}
+    with patch.object(cli,'gh_api',side_effect=[run,{'artifacts':[artifact]}]):
+        with pytest.raises(r.InvalidPackage,match='No compatible'):
+            cli.download_checkpoint('1','2024',tmp_path/'input.sofa')
+    assert not (tmp_path/'input.sofa').exists()
+
+
+def test_retry_after_prevents_browser_start(monkeypatch,tmp_path):
+    from datetime import datetime,timedelta,timezone
+    from argparse import Namespace
+    monkeypatch.syspath_prepend(str(r.ROOT/'scripts'))
+    import sofascore_recovery as cli
+    state=complete_state();state.update(status='blocked',retry_at=(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat())
+    path=tmp_path/'input.sofa';r.encrypt_document(r.pack(state),path,b'x'*32)
+    args=Namespace(mode='collect',season='2024',checkpoint='1',output=tmp_path/'output',input_package=path,refresh=False)
+    with patch.object(r,'read_key',return_value=b'x'*32),patch.object(r.scraper,'build_driver') as build:
+        with pytest.raises(r.InvalidPackage,match='Retry-After'):
+            cli.run_collection(args)
+    build.assert_not_called()

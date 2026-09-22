@@ -113,7 +113,7 @@ def run_collection(args):
         with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as report:
             report.write('## Sofascore recovery\n\n```json\n'+json.dumps(summary,indent=2)+'\n```\n')
             report.write('Only `validated` represents a complete season. `partial` is resumable and not importable.\n')
-    return 2 if state['status'] in ('blocked','invalid') else 0
+    return 2 if state['status'] in ('blocked','invalid') or (args.mode == 'probe' and not summary['probe_ok']) else 0
 
 
 def apply_local(document, *, pg_dump=None):
