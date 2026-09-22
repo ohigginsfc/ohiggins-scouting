@@ -33,7 +33,7 @@ class LeagueConfig:
 
 
 LEAGUES: tuple[LeagueConfig, ...] = (
-    LeagueConfig("cl", "primera", "Primera División Chile", 11653, 88493, "cl_primera_2025"),
+    LeagueConfig("cl", "primera", "Primera División Chile", 11653, 71131, "cl_primera_2025"),
     LeagueConfig("cl", "segunda", "Liga de Ascenso Chile", 1240, 89007, "cl_segunda_2025"),
     LeagueConfig("ar", "primera", "Liga Profesional Argentina", 155, 87913, "ar_primera_2025"),
     LeagueConfig("ar", "segunda", "Primera Nacional Argentina", 703, 87940, "ar_segunda_2025"),
@@ -44,10 +44,10 @@ LEAGUES: tuple[LeagueConfig, ...] = (
         "primera",
         "Primera División Chile",
         11653,
-        71131,
+        57883,
         "cl_primera_2024",
         season="2024",
-        season_label="2024-2025",
+        season_label="2024",
     ),
 )
 

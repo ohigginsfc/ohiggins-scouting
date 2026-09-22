@@ -51,7 +51,7 @@ from sofascore_metric_registry import (
 
 # ── DEFAULTS (Chile Primera) ─────────────────────────────────────────────────
 DEFAULT_TOURNAMENT_ID = 11653
-DEFAULT_SEASON_ID = 88493
+DEFAULT_SEASON_ID = 71131  # Chile 2025; 88493 corresponde a 2026.
 DEFAULT_OUTPUT_DIR = Path("sofascore_output")
 
 BASE_URL = "https://www.sofascore.com/api/v1"

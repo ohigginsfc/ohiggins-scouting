@@ -99,7 +99,7 @@ HISTORICAL_IMPORT_OPTIONS: tuple[dict[str, str], ...] = (
         "season": "2024",
         "label": "Primera División Chile 2024",
         "tournament_id": "11653",
-        "season_id": "71131",
+        "season_id": "57883",
     },
 )
 

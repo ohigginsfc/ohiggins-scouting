@@ -44,3 +44,19 @@ python scripts/update_sofascore_incremental.py --only cl_primera_2025 --season 2
 ```
 
 Quitar `--dry-run` permite descargar e importar esa liga, únicamente después de comprobar el destino `DB_*`. El modo HTTP no necesita Chrome: informa los errores HTTP del proveedor y no intenta eludirlos usando otros mecanismos de acceso. Un error 403 o 429 impide confirmar sincronización aunque PostgreSQL esté disponible.
+
+## Identificadores de Chile verificados en el navegador
+
+El 22 de septiembre de 2026 se contrastó el selector de temporadas de la web de Sofascore (torneo 11653):
+
+| Temporada | Identificador | Página |
+| --- | --- | --- |
+| 2024 | 57883 | https://www.sofascore.com/football/tournament/chile/primera-division/11653#id:57883 |
+| 2025 | 71131 | https://www.sofascore.com/football/tournament/chile/primera-division/11653#id:71131 |
+| 2026 | 88493 | https://www.sofascore.com/football/tournament/chile/primera-division/11653#id:88493 |
+
+La configuración anterior etiquetaba 88493 como 2025 y 71131 como 2024. Se corrigen el worker, el selector histórico, el scraper y el seed ejecutable para conservar los años solicitados. Las migraciones antiguas se mantienen como historial; no se ha ejecutado una modificación de la base del club.
+
+No reutilizar checkpoints ni publicaciones anteriores de esos ámbitos sin verificar su temporada: podrían estar etiquetados con un año incorrecto. Esta corrección no acredita que existan datos contaminados ni modifica registros existentes. Los demás torneos todavía requieren contrastar sus identificadores.
+
+La web pública cargó correctamente el club y estadísticas de liga durante la revisión. Eso demuestra disponibilidad de la interfaz web, no acceso autorizado del worker a los endpoints ni una sincronización completa.

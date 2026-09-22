@@ -14,14 +14,14 @@ from scouting.db import get_connection
 from scouting.repositories import external_competitions_repository
 
 SOFASCORE_COMPETITIONS = (
-    ("cl", "primera", "Primera División Chile", 11653, 88493),
+    ("cl", "primera", "Primera División Chile", 11653, 71131),
     ("cl", "segunda", "Liga de Ascenso Chile", 1240, 89007),
     ("ar", "primera", "Liga Profesional Argentina", 155, 87913),
     ("ar", "segunda", "Primera Nacional Argentina", 703, 87940),
     ("uy", "primera", "Liga AUF Uruguay", 278, 89288),
     ("uy", "segunda", "Segunda División Uruguay", 1908, 91195),
-    # Histórica (no activa en Dashboard; season_id 71131 = 2024-2025)
-    ("cl", "primera", "Primera División Chile", 11653, 71131),
+    # Histórica: temporada natural 2024, verificada en el selector de Sofascore.
+    ("cl", "primera", "Primera División Chile", 11653, 57883),
 )
 
 
