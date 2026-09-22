@@ -55,6 +55,7 @@ def _base_env(**overrides: str) -> dict[str, str]:
         "SCOUTING_PASSWORD_HASH",
         "SOFASCORE_ACTIVE_SEASON",
         "SOFASCORE_HISTORICAL_SEASON",
+        "SOFASCORE_FETCH_MODE",
         "SCOUTING_DEBUG_MODE",
         "SHOW_ADMIN_TAB",
         "DISABLE_SOFASCORE_UPDATE",
@@ -177,7 +178,7 @@ def test_bcrypt_dollars_survive_compose_interpolation() -> None:
 
 
 def test_ec2_dashboard_worker_runs_inside_app_with_persistent_output():
-    cfg=load_compose_config(EC2_COMPOSE_FILE,env=_base_env())
+    cfg=load_compose_config(EC2_COMPOSE_FILE,env=_base_env(COMPOSE_PROFILES='worker'))
     app=cfg['services']['app']
     assert app['environment']['SOFASCORE_WORKER_MODE']=='local'
     assert app['environment']['SOFASCORE_IMPORT_MODE']=='direct'
