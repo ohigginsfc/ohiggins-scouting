@@ -147,14 +147,6 @@ def build_driver(headless: bool = True) -> webdriver.Chrome:
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--window-size=1920,1080")
-    opts.add_argument("--disable-blink-features=AutomationControlled")
-    opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-    opts.add_experimental_option("useAutomationExtension", False)
-    opts.add_argument(
-        "user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    )
-
     chrome_binary = _resolve_chrome_binary()
     if chrome_binary:
         _require_executable(chrome_binary, label="Chromium")
@@ -174,9 +166,6 @@ def build_driver(headless: bool = True) -> webdriver.Chrome:
         )
         driver = webdriver.Chrome(options=opts)
 
-    driver.execute_script(
-        "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
-    )
     return driver
 
 
@@ -442,6 +431,15 @@ def _http_warmup(session: Any, backend: str) -> None:
         log.debug("HTTP warmup failed (%s): %s", backend, exc)
 
 
+class SofascoreFetchError(RuntimeError):
+    """Transport failure; must never be interpreted as missing sports data."""
+
+
+def _check_access_status(status: int | None, url: str) -> None:
+    if status in {401, 403, 429}:
+        raise SofascoreFetchError(f"Sofascore HTTP {status}: {url}")
+
+
 def fetch_json_requests(
     url: str,
     delay: float = 0.0,
@@ -490,6 +488,7 @@ def fetch_json_requests(
             status_int = (
                 int(meta["status_code"]) if meta["status_code"] is not None else None
             )
+            _check_access_status(status_int, attempt_url)
             if status_int is not None and status_int >= 400:
                 payload = _parse_json_payload(last_raw)
                 if is_expected_missing_player_stats(
@@ -523,6 +522,8 @@ def fetch_json_requests(
                     meta["api_error"] = _api_error_message(json.loads(last_raw))
                 except json.JSONDecodeError:
                     pass
+        except SofascoreFetchError:
+            raise
         except Exception as exc:
             log.warning("HTTP fetch failed (%s) %s: %s", backend, attempt_url, exc)
 
@@ -661,7 +662,7 @@ def fetch_json(
             _note_expected_missing_player_stats(ctx or get_fetch_context(), url)
             return None
         if response.status_code != 200:
-            raise RuntimeError(f"Sofascore HTTP {response.status_code}: {url}")
+            raise SofascoreFetchError(f"Sofascore HTTP {response.status_code}: {url}")
         return response.json()
 
     ctx = ctx or get_fetch_context()
@@ -681,6 +682,7 @@ def fetch_json(
             delay=delay if attempt == 0 else 0.0,
             ctx=ctx,
         )
+        _check_access_status(_meta.get("status_code"), url)
         if _meta.get("expected_missing_player_stats"):
             _note_expected_missing_player_stats(ctx, url)
             return None
@@ -691,6 +693,7 @@ def fetch_json(
             continue
 
         raw, xhr_status = _fetch_json_selenium_xhr(active_driver, url, ctx=ctx)
+        _check_access_status(xhr_status, url)
         if xhr_status == 404 and is_expected_missing_player_stats(url, 404, None):
             _note_expected_missing_player_stats(ctx, url)
             return None
@@ -728,7 +731,7 @@ def fetch_json(
             url,
             debug_dir(),
         )
-    return None
+    raise SofascoreFetchError(f"Sofascore fetch failed after retries: {url}")
 
 
 def probe_http_endpoint(url: str) -> dict[str, Any]:

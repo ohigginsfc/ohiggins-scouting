@@ -28,6 +28,8 @@ services:
     environment:
       <<: *app-runtime-environment
       PYTHONPATH: /app/src
+      SOFASCORE_WORKER_MODE: local
+      SOFASCORE_IMPORT_MODE: direct
       COMPOSE_PROJECT_NAME: ohiggins-scouting-prod
       COMPOSE_FILE: /app/docker-compose.ec2.yml
       PROJECT_ROOT: /app
@@ -38,6 +40,9 @@ services:
         condition: service_healthy
       db-init:
         condition: service_completed_successfully
+    volumes:
+      - ./data:/app/data
+      - ./web_scraping_sofascore/sofascore_output:/app/web_scraping_sofascore/sofascore_output
     command:
       - streamlit
       - run

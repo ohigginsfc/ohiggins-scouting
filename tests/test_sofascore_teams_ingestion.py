@@ -55,7 +55,7 @@ class TeamsRebuildTests(unittest.TestCase):
             (league_dir / "events.json").write_text(
                 json.dumps(_sample_events()), encoding="utf-8"
             )
-            (league_dir / "checkpoint_raw.json").write_text("{}", encoding="utf-8")
+            (league_dir / "checkpoint_raw.json").write_text('{"1":[{"event_id":123}]}', encoding="utf-8")
             ok, reason, n = ensure_teams_json(league_dir)
             self.assertTrue(ok)
             self.assertEqual(n, 3)
@@ -161,7 +161,7 @@ class IngestionStatusSemanticsTests(unittest.TestCase):
             root = Path(tmp)
             league_dir = root / "web_scraping_sofascore" / "sofascore_output" / "cl_primera_2024"
             league_dir.mkdir(parents=True)
-            (league_dir / "checkpoint_raw.json").write_text("{}", encoding="utf-8")
+            (league_dir / "checkpoint_raw.json").write_text('{"1":[{"event_id":123}]}', encoding="utf-8")
             (league_dir / "events.json").write_text(json.dumps(_sample_events()), encoding="utf-8")
             (league_dir / "player_stats.csv").write_text("a,b\n1,2\n", encoding="utf-8")
             (league_dir / "player_stats.json").write_text("[]", encoding="utf-8")
@@ -204,12 +204,12 @@ class IngestionStatusSemanticsTests(unittest.TestCase):
             root = Path(tmp)
             league_dir = root / "web_scraping_sofascore" / "sofascore_output" / "cl_primera_2024"
             league_dir.mkdir(parents=True)
-            (league_dir / "checkpoint_raw.json").write_text("{}", encoding="utf-8")
+            (league_dir / "checkpoint_raw.json").write_text('{"1":[{"event_id":123}]}', encoding="utf-8")
             # sin events → teams impossible
             result = inc.LeagueIncrementalResult(league=League())
             marked = {}
 
-            def fake_mark(league, season_year, *, ok, error_message):
+            def fake_mark(league, season_year, *, ok, error_message, event_ids):
                 marked["ok"] = ok
                 marked["error"] = error_message
 

@@ -130,3 +130,13 @@ docker compose -f docker-compose.ec2.yml --profile worker run --rm sofascore-wor
 ```
 
 Mantén `DISABLE_SOFASCORE_UPDATE=1` en producción si no quieres permitir lanzarlo desde la interfaz.
+
+## Sincronización desde el panel
+
+La aplicación EC2 ejecuta el worker con su propio Python dentro del contenedor (`SOFASCORE_WORKER_MODE=local`, importación directa). No necesita acceso al daemon Docker del host. Los directorios de datos y checkpoints se montan también en la aplicación para conservarlos al recrear el contenedor y compartirlos con el worker de mantenimiento.
+
+La descarga permanece desactivada por defecto. Para habilitarla, configurar `DISABLE_SOFASCORE_UPDATE=0` y recrear la aplicación. Confirmar previamente las temporadas y el acceso del proveedor. Esta configuración no evita rechazos HTTP del proveedor.
+
+`python scripts/test_selenium_runtime.py` verifica Chromium y ejecución asíncrona en una página local. Su resultado no certifica acceso a Sofascore. Los rechazos de acceso y límites de peticiones se propagan como errores; no se transforman en partidos sin estadísticas.
+
+Tras importar un checkpoint, únicamente sus partidos en estado `downloaded` pasan a `processed`. Los estados `failed`, `pending` y los partidos ajenos al checkpoint se conservan. Checkpoints antiguos sin identificadores de partido válidos se rechazan; deben recuperarse desde una fuente trazable. El commit de métricas y la confirmación de estados siguen siendo operaciones separadas: si falla la segunda, la ejecución informa error y puede reintentarse.

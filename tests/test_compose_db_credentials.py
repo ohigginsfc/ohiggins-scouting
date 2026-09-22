@@ -174,3 +174,13 @@ def test_bcrypt_dollars_survive_compose_interpolation() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "hash-ok" in result.stdout
+
+
+def test_ec2_dashboard_worker_runs_inside_app_with_persistent_output():
+    cfg=load_compose_config(EC2_COMPOSE_FILE,env=_base_env())
+    app=cfg['services']['app']
+    assert app['environment']['SOFASCORE_WORKER_MODE']=='local'
+    assert app['environment']['SOFASCORE_IMPORT_MODE']=='direct'
+    mounts={mount['target'] for mount in app['volumes']}
+    assert {'/app/data','/app/web_scraping_sofascore/sofascore_output'} <= mounts
+    assert '/var/run/docker.sock' not in mounts

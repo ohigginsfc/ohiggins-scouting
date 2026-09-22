@@ -22,7 +22,7 @@ _SCRAPER = _ROOT / "web_scraping_sofascore"
 if str(_SCRAPER) not in sys.path:
     sys.path.insert(0, str(_SCRAPER))
 
-SOFASCORE_HOME = "https://www.sofascore.com/"
+RUNTIME_PAGE = "data:text/html,<title>Scouting Selenium runtime</title><p>Runtime check</p>"
 
 
 def main() -> int:
@@ -38,15 +38,17 @@ def main() -> int:
     driver = None
     try:
         driver = build_driver(headless=True)
-        driver.get(SOFASCORE_HOME)
-        title = driver.title or ""
-        final_url = driver.current_url or ""
-        print(f"title: {title}")
-        print(f"url:   {final_url}")
-        if "sofascore" not in final_url.lower() and "sofascore" not in title.lower():
-            print("ERROR: la página abierta no parece Sofascore", file=sys.stderr)
+        driver.get(RUNTIME_PAGE)
+        if driver.title != "Scouting Selenium runtime":
+            print("ERROR: el navegador no abrió la página local de prueba", file=sys.stderr)
             return 1
-        print("OK")
+        result = driver.execute_async_script(
+            "const done=arguments[arguments.length-1]; done(document.title);"
+        )
+        if result != "Scouting Selenium runtime":
+            print("ERROR: no funciona la ejecución asíncrona de Selenium", file=sys.stderr)
+            return 1
+        print("OK: runtime Selenium local. Acceso a Sofascore y descarga de datos NO comprobados.")
         return 0
     except Exception as exc:  # noqa: BLE001 — smoke test: mostrar fallo y exit != 0
         print(f"ERROR: {exc}", file=sys.stderr)

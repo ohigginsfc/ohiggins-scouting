@@ -9,6 +9,7 @@ re-agrega, stage e importa con --replace de la competición afectada.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -325,6 +326,29 @@ def finalize_league_from_checkpoint(
         print(f"  ERROR: {msg}", file=sys.stderr)
         return result
 
+    try:
+        checkpoint_bytes = checkpoint.read_bytes()
+        checkpoint_hash = hashlib.sha256(checkpoint_bytes).hexdigest()
+        checkpoint_data = json.loads(checkpoint_bytes)
+        if not isinstance(checkpoint_data, dict) or not checkpoint_data:
+            raise ValueError("Checkpoint vacío o inválido")
+        event_ids_set: set[int] = set()
+        for entries in checkpoint_data.values():
+            if not isinstance(entries, list):
+                raise ValueError("Entradas de checkpoint inválidas")
+            for entry in entries:
+                event_id = entry.get("event_id") if isinstance(entry, dict) else None
+                if type(event_id) is not int or event_id <= 0:
+                    raise ValueError("Checkpoint sin event_id válido; no se puede publicar su cobertura")
+                event_ids_set.add(event_id)
+        if not event_ids_set:
+            raise ValueError("Checkpoint sin partidos")
+        event_ids = sorted(event_ids_set)
+    except (OSError, ValueError) as exc:
+        result.errors += 1
+        result.error_messages.append(f"checkpoint: {exc}")
+        return result
+
     print(f"  Procesando checkpoint existente: {checkpoint}")
 
     # teams.json no lo genera el incremental (solo el scraper completo vía get_teams).
@@ -337,6 +361,7 @@ def finalize_league_from_checkpoint(
         _mark_scope_import_outcome(
             league,
             season_year_from_league(league),
+            event_ids=event_ids,
             ok=False,
             error_message=f"validate/teams: {teams_reason}",
         )
@@ -355,6 +380,7 @@ def finalize_league_from_checkpoint(
         _mark_scope_import_outcome(
             league,
             season_year_from_league(league),
+            event_ids=event_ids,
             ok=False,
             error_message=f"reaggregate: {reason}",
         )
@@ -370,6 +396,7 @@ def finalize_league_from_checkpoint(
         _mark_scope_import_outcome(
             league,
             season_year_from_league(league),
+            event_ids=event_ids,
             ok=False,
             error_message=f"validate: {reason}",
         )
@@ -383,6 +410,7 @@ def finalize_league_from_checkpoint(
         _mark_scope_import_outcome(
             league,
             season_year_from_league(league),
+            event_ids=event_ids,
             ok=False,
             error_message=f"staging: {exc}",
         )
@@ -393,6 +421,7 @@ def finalize_league_from_checkpoint(
         _mark_scope_import_outcome(
             league,
             season_year_from_league(league),
+            event_ids=event_ids,
             ok=False,
             error_message="staging: no staging dir",
         )
@@ -403,6 +432,8 @@ def finalize_league_from_checkpoint(
         return result
 
     try:
+        if hashlib.sha256(checkpoint.read_bytes()).hexdigest() != checkpoint_hash:
+            raise ValueError("El checkpoint cambió durante la preparación; repetir la importación")
         import_league(
             root,
             league,
@@ -421,6 +452,7 @@ def finalize_league_from_checkpoint(
         _mark_scope_import_outcome(
             league,
             season_year_from_league(league),
+            event_ids=event_ids,
             ok=False,
             error_message=f"import: {exc}",
         )
@@ -434,6 +466,7 @@ def finalize_league_from_checkpoint(
     _mark_scope_import_outcome(
         league,
         season_year_from_league(league),
+        event_ids=event_ids,
         ok=True,
         error_message=None,
     )
@@ -446,6 +479,7 @@ def _mark_scope_import_outcome(
     *,
     ok: bool,
     error_message: str | None,
+    event_ids: list[int],
 ) -> None:
     """Tras import: downloaded→processed. Ante fallo: dejar downloaded con error."""
     try:
@@ -457,7 +491,8 @@ def _mark_scope_import_outcome(
                     division=league.division,
                     competition=league.competition,
                     season=season_year,
-                    from_statuses={"downloaded", "pending", "failed"},
+                    event_ids=event_ids,
+                    from_statuses={"downloaded"},
                     to_status="processed",
                     error_message=None,
                 )
@@ -469,7 +504,8 @@ def _mark_scope_import_outcome(
                     division=league.division,
                     competition=league.competition,
                     season=season_year,
-                    from_statuses={"downloaded", "processed"},
+                    event_ids=event_ids,
+                    from_statuses={"downloaded"},
                     to_status="downloaded",
                     error_message=error_message,
                 )
@@ -478,7 +514,7 @@ def _mark_scope_import_outcome(
                     + (f" · {error_message}" if error_message else "")
                 )
     except Exception as exc:  # noqa: BLE001
-        print(f"  AVISO: no se pudo actualizar sofascore_event_ingestion: {exc}", file=sys.stderr)
+        raise RuntimeError("No se pudo confirmar el estado de los partidos importados") from exc
 
 
 def _repair_premature_processed_events(league: LeagueConfig, season_year: int) -> None:
