@@ -90,6 +90,7 @@ def upsert_event(
     import_batch_id: UUID | None = None,
     error_message: str | None = None,
     source_name: str = SOURCE_NAME,
+    commit: bool = True,
 ) -> None:
     if processing_status not in VALID_STATUSES:
         raise ValueError(f"Invalid processing_status: {processing_status}")
@@ -144,7 +145,8 @@ def upsert_event(
                 error_message,
             ),
         )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def seed_processed_events(

@@ -97,3 +97,4 @@ docker-compose.override.yml
 docker-compose.audit-clean.yml
 
 .local_checks/
+data/recovery/

@@ -140,6 +140,7 @@ def import_dataframe(
     conn, df: pd.DataFrame, *, country: str, division: str, season: str,
     competition: str, source_file: str, replace: bool = False,
     teams_lookup: dict[str, str] | None = None,
+    publication_hook=None,
 ) -> tuple[UUID, dict[str, Any]]:
     """Publish the complete CSV atomically; retain the previous version on any error.
 
@@ -207,6 +208,8 @@ def import_dataframe(
             if replace:
                 _replace_previous_data(conn, batch_id=batch_id, country=country,
                                        division=division, season=season, competition=competition)
+            if publication_hook is not None:
+                publication_hook(conn, batch_id)
             import_batches_repository.complete_import_batch(conn, batch_id, run_stats, commit=False)
     except Exception as exc:
         run_stats["metrics_attempted"] = run_stats["metrics_inserted"]

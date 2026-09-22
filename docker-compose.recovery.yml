@@ -1,0 +1,14 @@
+name: scouting-recovery
+services:
+  collector:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.scraper
+    shm_size: 1gb
+    environment:
+      SOFASCORE_ARTIFACT_KEY: ${SOFASCORE_ARTIFACT_KEY:?Required for encrypted checkpoints}
+      GITHUB_SHA: ${GITHUB_SHA:-local}
+      GITHUB_RUN_ID: ${GITHUB_RUN_ID:-local}
+    volumes:
+      - ./data/recovery:/app/data/recovery
+    entrypoint: ["python", "scripts/sofascore_recovery.py"]

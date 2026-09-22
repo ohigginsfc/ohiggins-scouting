@@ -956,6 +956,7 @@ def process_finished_event(
     delay_lineup: float,
     delay_fallback: float,
     delay_incidents: float,
+    fetcher=None,
 ) -> tuple[list[dict], IncidentsScrapeDiagnostics]:
     """Descarga lineup + incidents de un partido finalizado. Etiqueta entradas con event_id."""
     event_id = int(event["id"])
@@ -968,6 +969,7 @@ def process_finished_event(
         delay_fallback=delay_fallback,
         home_team=event.get("homeTeam"),
         away_team=event.get("awayTeam"),
+        fetcher=fetcher,
     )
     if not players:
         return [], diag
@@ -977,6 +979,7 @@ def process_finished_event(
         driver,
         event_id,
         delay_incidents=delay_incidents,
+        fetcher=fetcher,
     )
     diag.incidents_success += 1
     cards_by_player, card_diag = extract_player_cards_from_incidents(incidents)
@@ -1012,13 +1015,15 @@ def get_lineup_with_stats(
     delay_fallback: float,
     home_team: dict | None = None,
     away_team: dict | None = None,
+    fetcher=None,
 ) -> list[dict]:
     """
     Returns list of dicts with player info + match statistics already embedded.
     Falls back to individual stats endpoint if statistics missing from lineup.
     """
     url = f"{BASE_URL}/event/{event_id}/lineups"
-    data = fetch_json(url, delay=delay_lineup, driver=driver)
+    fetch = fetcher or fetch_json
+    data = fetch(url, delay=delay_lineup, driver=driver)
     players = []
     if not data:
         return players
@@ -1045,7 +1050,7 @@ def get_lineup_with_stats(
                     event_id,
                     p["id"],
                 )
-                fb = fetch_json(
+                fb = fetch(
                     f"{BASE_URL}/event/{event_id}/player/{p['id']}/statistics",
                     delay=delay_fallback,
                     driver=driver,
@@ -1076,13 +1081,14 @@ def get_event_incidents(
     event_id: int,
     *,
     delay_incidents: float = DEFAULT_DELAY_INCIDENTS,
+    fetcher=None,
 ) -> list[dict]:
     """
     Tarjetas y otros incidents del partido.
     Usa fetch_json (HTTP curl_cffi → Selenium). En 403/404 devuelve [] sin abortar el scrape.
     """
     url = f"{BASE_URL}/event/{event_id}/incidents"
-    data = fetch_json(url, delay=delay_incidents, driver=driver)
+    data = (fetcher or fetch_json)(url, delay=delay_incidents, driver=driver)
     if not data or not isinstance(data, dict):
         log.warning(
             "Incidents no disponibles para event %s (403/bloqueo o vacío). "
