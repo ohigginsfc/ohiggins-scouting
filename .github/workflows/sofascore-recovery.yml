@@ -10,6 +10,11 @@ on:
         type: choice
         options: ['2024', '2025']
         default: '2024'
+      transport:
+        description: 'HTTP uses the original curl_cffi client; browser is an explicit alternative'
+        type: choice
+        options: [http, browser]
+        default: http
       checkpoint:
         description: 'new (explicit fresh start), latest, or prior collection run ID'
         type: string
@@ -34,6 +39,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RECOVERY_MODE: ${{ inputs.mode }}
       RECOVERY_SEASON: ${{ inputs.season }}
+      RECOVERY_TRANSPORT: ${{ inputs.transport }}
       RECOVERY_CHECKPOINT: ${{ inputs.checkpoint }}
       RECOVERY_REFRESH: ${{ inputs.refresh }}
     steps:
@@ -53,10 +59,11 @@ jobs:
       - name: Build worker
         run: docker compose -f docker-compose.recovery.yml build collector
       - name: Check Selenium runtime
+        if: inputs.transport == 'browser' && inputs.mode != 'validate'
         run: docker compose -f docker-compose.recovery.yml run --rm --entrypoint python collector scripts/test_selenium_runtime.py
       - name: Collect or validate
         run: |
-          args=(run --mode "$RECOVERY_MODE" --season "$RECOVERY_SEASON" --checkpoint "$RECOVERY_CHECKPOINT")
+          args=(run --mode "$RECOVERY_MODE" --season "$RECOVERY_SEASON" --checkpoint "$RECOVERY_CHECKPOINT" --transport "$RECOVERY_TRANSPORT")
           if [ "$RECOVERY_CHECKPOINT" != new ]; then args+=(--input-package /app/data/recovery/input.sofa); fi
           if [ "$RECOVERY_REFRESH" = true ]; then args+=(--refresh); fi
           docker compose -f docker-compose.recovery.yml run --rm collector "${args[@]}"

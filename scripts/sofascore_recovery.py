@@ -82,22 +82,30 @@ def run_collection(args):
         persist = lambda current: recovery.encrypt_document(recovery.pack(current), output, key)
         persist(state)
         driver = None
+        transport = None
         try:
-            driver = recovery.scraper.build_driver()
-            driver.set_page_load_timeout(40)
-            driver.set_script_timeout(35)
-            driver.get(recovery.scraper.SOFASCORE_HOME)
-            body = driver.find_element('tag name', 'body').text
-            if '"code": 403' in body or '"code":403' in body or 'captcha' in driver.title.lower():
-                raise recovery.ProviderBlocked(403)
-            recovery.scraper.WebDriverWait(driver,25).until(lambda d: 'Sofascore' in d.title and len(d.find_element('tag name','body').text.strip()) > 100)
-            transport = recovery.BrowserTransport(driver)
+            if args.transport == 'http':
+                transport = recovery.HttpTransport()
+                transport.warmup()
+            else:
+                driver = recovery.scraper.build_driver()
+                driver.set_page_load_timeout(40)
+                driver.set_script_timeout(35)
+                driver.get(recovery.scraper.SOFASCORE_HOME)
+                body = driver.find_element('tag name', 'body').text
+                if '"code": 403' in body or '"code":403' in body or 'captcha' in driver.title.lower():
+                    raise recovery.ProviderBlocked(403)
+                recovery.scraper.WebDriverWait(driver,25).until(lambda d: 'Sofascore' in d.title and len(d.find_element('tag name','body').text.strip()) > 100)
+                transport = recovery.BrowserTransport(driver)
             recovery.collect(state, transport.fetch, persist, probe=args.mode=='probe')
         except recovery.ProviderBlocked as exc:
             state['status'], state['errors'] = 'blocked', {'provider':str(exc.status)}
+            state['retry_at'] = exc.retry_at
         except Exception as exc:
             state['status'], state['errors'] = 'invalid', {'runtime':type(exc).__name__}
         finally:
+            if isinstance(transport, recovery.HttpTransport):
+                transport.close()
             if driver is not None:
                 try:
                     driver.quit()
@@ -158,6 +166,7 @@ def main():
     collect = commands.add_parser('run')
     collect.add_argument('--mode',choices=['probe','collect','validate'],required=True)
     collect.add_argument('--season',choices=list(recovery.SEASONS),required=True)
+    collect.add_argument('--transport',choices=['http','browser'],default='http')
     collect.add_argument('--checkpoint',default='latest',help='new, latest, or trusted workflow run ID')
     collect.add_argument('--input-package',type=Path,help='Previously downloaded encrypted checkpoint')
     collect.add_argument('--output',type=Path,default=ROOT/'data/recovery/output')
