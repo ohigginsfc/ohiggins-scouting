@@ -157,6 +157,7 @@ def create_player(
     preferred_foot: str | None = None,
     height_cm: Decimal | float | None = None,
     image_path: str | None = None,
+    commit: bool = True,
 ) -> int:
     with conn.cursor() as cur:
         cur.execute(
@@ -181,7 +182,8 @@ def create_player(
             ),
         )
         row = cur.fetchone()
-        conn.commit()
+        if commit:
+            conn.commit()
         return int(row[0])
 
 
@@ -195,6 +197,7 @@ def merge_player_empty_fields(
     nationality: str | None = None,
     position: str | None = None,
     current_team: str | None = None,
+    commit: bool = True,
 ) -> None:
     """
     Actualiza solo columnas que están NULL en BD y reciben valor no vacío.
@@ -233,7 +236,8 @@ def merge_player_empty_fields(
             f"UPDATE players SET {', '.join(sets)} WHERE id = %s",
             params,
         )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def update_player_image_path(conn: Connection, player_id: int, image_path: str) -> None:
@@ -255,6 +259,7 @@ def get_or_create_player(
     preferred_foot: str | None = None,
     height_cm: Decimal | float | None = None,
     image_path: str | None = None,
+    commit: bool = True,
 ) -> tuple[int, bool]:
     """
     Return (player_id, created) where created is True if a new row was inserted.
@@ -279,9 +284,12 @@ def get_or_create_player(
             preferred_foot=preferred_foot,
             height_cm=height_cm,
             image_path=image_path,
+            commit=commit,
         )
         return pid, True
     except UniqueViolation:
+        if not commit:
+            raise
         conn.rollback()
         again = find_player_by_normalized_name(conn, normalized)
         if again:

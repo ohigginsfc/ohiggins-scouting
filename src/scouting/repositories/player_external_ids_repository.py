@@ -46,6 +46,7 @@ def create_or_update_external_id(
     provider: str,
     external_id: str,
     external_name: str | None = None,
+    commit: bool = True,
 ) -> None:
     ext = str(external_id).strip()
     with conn.cursor() as cur:
@@ -59,4 +60,5 @@ def create_or_update_external_id(
             """,
             (player_id, provider, ext, external_name),
         )
-    conn.commit()
+    if commit:
+        conn.commit()

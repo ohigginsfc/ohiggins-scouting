@@ -107,6 +107,7 @@ def create_metric(
 def create_metrics_batch(
     conn: Connection,
     rows: list[dict[str, Any]],
+    commit: bool = True,
 ) -> int:
     """Inserta varias métricas en una sola transacción. Cada dict: player_id, source_name, metric_name, ..."""
     if not rows:
@@ -136,11 +137,12 @@ def create_metrics_batch(
         )
     with conn.cursor() as cur:
         cur.executemany(sql, params)
-    conn.commit()
+    if commit:
+        conn.commit()
     return len(params)
 
 
-def delete_metrics_by_batch_ids(conn: Connection, batch_ids: list[UUID]) -> int:
+def delete_metrics_by_batch_ids(conn: Connection, batch_ids: list[UUID], *, commit: bool = True) -> int:
     if not batch_ids:
         return 0
     ids = [str(b) for b in batch_ids]
@@ -151,7 +153,8 @@ def delete_metrics_by_batch_ids(conn: Connection, batch_ids: list[UUID]) -> int:
             ids,
         )
         n = cur.rowcount
-    conn.commit()
+    if commit:
+        conn.commit()
     return int(n)
 
 
