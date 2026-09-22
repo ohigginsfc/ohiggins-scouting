@@ -1,4 +1,4 @@
-"""Ejecutar actualización incremental Sofascore vía docker compose (worker)."""
+"""Ejecutar actualización Sofascore con un worker Docker o Python local."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field, fields as dataclass_fields, replace
 from datetime import date, datetime
 from functools import lru_cache
@@ -98,7 +99,7 @@ HISTORICAL_IMPORT_OPTIONS: tuple[dict[str, str], ...] = (
         "season": "2024",
         "label": "Primera División Chile 2024",
         "tournament_id": "11653",
-        "season_id": "71131",
+        "season_id": "57883",
     },
 )
 
@@ -759,6 +760,51 @@ def latest_log_path() -> Path | None:
     return logs[0] if logs else None
 
 
+def check_worker_runtime() -> DockerRuntimeInfo:
+    if os.environ.get("SOFASCORE_WORKER_MODE", "docker").strip().lower() != "local":
+        return check_docker_runtime()
+    available = (PROJECT_ROOT / "scripts/update_sofascore_incremental.py").is_file()
+    return DockerRuntimeInfo(
+        ok=available, docker_path=None, docker_version=None, compose_invocation=None,
+        compose_version=None, socket_present=False, socket_readable=False,
+        messages=(f"Worker local: {sys.executable}",),
+        error=None if available else "No se encuentra el script incremental local.",
+    )
+
+
+def _execute_local_worker(script_args: list[str], *, log_suffix: str, timeout_sec: int,
+                          acquire_lock: bool, lock_meta: dict[str, Any] | None) -> WorkerRunOutput:
+    _ensure_dirs()
+    cmd = [sys.executable, str(PROJECT_ROOT / "scripts/update_sofascore_incremental.py"), *script_args]
+    command = command_to_string(cmd)
+    if acquire_lock and is_update_in_progress():
+        return WorkerRunOutput(False, command, "", "", -1, None, locked=True,
+                               error_message="Actualización en curso.")
+    log_path = _log_filename(log_suffix)
+    if acquire_lock:
+        LOCK_PATH.write_text(json.dumps({**(lock_meta or {}), "pid": os.getpid(),
+            "started_at": datetime.now().isoformat(), "command": command}), encoding="utf-8")
+    try:
+        env = {**os.environ, "PYTHONPATH": str(PROJECT_ROOT / "src"),
+               "PYTHONUTF8": "1", "SOFASCORE_IMPORT_MODE": "direct"}
+        proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=env, capture_output=True,
+            text=True, encoding="utf-8", errors="replace", timeout=timeout_sec,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        payload = parse_json_summary(proc.stdout)
+        error = (f"Error en la ejecución (código {proc.returncode})." if proc.returncode
+                 else _summary_error(payload) if "--json-summary" in script_args else None)
+        log_path.write_text(f"$ {command}\nexit_code={proc.returncode}\n{proc.stdout}\n{proc.stderr}", encoding="utf-8")
+        return WorkerRunOutput(error is None, command, proc.stdout, proc.stderr,
+                               proc.returncode, log_path, json_payload=payload, error_message=error)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        message = "Tiempo agotado." if isinstance(exc, subprocess.TimeoutExpired) else f"No se pudo iniciar el worker: {type(exc).__name__}"
+        log_path.write_text(message, encoding="utf-8")
+        return WorkerRunOutput(False, command, "", message, -1, log_path, error_message=message)
+    finally:
+        if acquire_lock:
+            LOCK_PATH.unlink(missing_ok=True)
+
+
 def _default_compose_invocation() -> tuple[str, ...]:
     info = check_docker_runtime()
     if info.compose_invocation:
@@ -771,6 +817,8 @@ def build_worker_command(
     *,
     compose_invocation: tuple[str, ...] | None = None,
 ) -> list[str]:
+    if os.environ.get("SOFASCORE_WORKER_MODE", "docker").strip().lower() == "local":
+        return [sys.executable, str(PROJECT_ROOT / "scripts/update_sofascore_incremental.py"), *script_args]
     compose = compose_invocation or _default_compose_invocation()
     return [
         *compose,
@@ -810,6 +858,25 @@ def parse_json_summary(stdout: str) -> dict[str, Any] | None:
     return None
 
 
+def _summary_error(payload: Any) -> str | None:
+    """An exit code alone does not establish that any league was checked."""
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        return "El worker no confirmó un resumen válido y satisfactorio."
+    leagues = payload.get("leagues")
+    if not isinstance(leagues, list) or not leagues:
+        return "El worker no confirmó ninguna competición revisada."
+    for league in leagues:
+        if not isinstance(league, dict) or not league.get("slug"):
+            return "El resumen contiene una competición inválida."
+        for field in ("errors", "pending_total", "total_calendar"):
+            value = league.get(field)
+            if type(value) is not int or value < 0:
+                return "El resumen contiene contadores ausentes o inválidos."
+        if league["errors"] or league.get("error_messages"):
+            return "El worker informó errores en una competición."
+    return None
+
+
 def _log_filename(suffix: str) -> Path:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return LOG_DIR / f"{ts}_{suffix}.log"
@@ -823,6 +890,9 @@ def _execute_worker(
     acquire_lock: bool = True,
     lock_meta: dict[str, Any] | None = None,
 ) -> WorkerRunOutput:
+    if os.environ.get("SOFASCORE_WORKER_MODE", "docker").strip().lower() == "local":
+        return _execute_local_worker(script_args, log_suffix=log_suffix, timeout_sec=timeout_sec,
+                                     acquire_lock=acquire_lock, lock_meta=lock_meta)
     _ensure_dirs()
     runtime = check_docker_runtime()
     cmd = build_worker_command(script_args, compose_invocation=runtime.compose_invocation)
@@ -944,7 +1014,7 @@ def _execute_worker(
         )
         save_runner_diagnostics(diag)
         json_payload = parse_json_summary(stdout)
-        error_message = None
+        error_message = _summary_error(json_payload) if "--json-summary" in script_args else None
         if proc.returncode != 0:
             if "already in use" in (stdout + stderr).lower():
                 error_message = "Conflicto de contenedores Docker (project name)."
@@ -957,7 +1027,7 @@ def _execute_worker(
             else:
                 error_message = f"Error en la ejecución (código {proc.returncode})."
         return WorkerRunOutput(
-            ok=proc.returncode == 0,
+            ok=proc.returncode == 0 and error_message is None,
             command=cmd_str,
             stdout=stdout,
             stderr=stderr,
@@ -1195,7 +1265,7 @@ def start_dashboard_sync_background() -> FriendlyUpdateResult:
     now = datetime.now()
     now_str = _format_dt(now)
     plan = load_platform_sync_plan()
-    runtime = check_docker_runtime()
+    runtime = check_worker_runtime()
     clear_orphan_sync_lock()
 
     if is_update_in_progress():
@@ -1277,6 +1347,7 @@ def start_dashboard_sync_background() -> FriendlyUpdateResult:
             stdout=log_fh,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             env={**os.environ, "PYTHONPATH": str(PROJECT_ROOT / "src")},
         )
     except OSError as exc:
@@ -1322,7 +1393,7 @@ def run_dashboard_sync_for_ui() -> FriendlyUpdateResult:
 
     now = datetime.now()
     now_str = _format_dt(now)
-    runtime = check_docker_runtime()
+    runtime = check_worker_runtime()
     technical_parts: list[str] = [runtime.diagnostics_text]
     log_paths: list[str] = []
 
@@ -1567,7 +1638,7 @@ def run_historical_import_for_ui(
     """
     now = datetime.now()
     now_str = _format_dt(now)
-    runtime = check_docker_runtime()
+    runtime = check_worker_runtime()
     technical_parts: list[str] = [runtime.diagnostics_text]
     log_paths: list[str] = []
     mode = "historical"
@@ -1729,7 +1800,7 @@ def run_historical_import_for_ui(
 def _run_update_for_ui(*, mode: str) -> FriendlyUpdateResult:
     now = datetime.now()
     now_str = _format_dt(now)
-    runtime = check_docker_runtime()
+    runtime = check_worker_runtime()
     technical_parts: list[str] = [runtime.diagnostics_text]
     log_paths: list[str] = []
     active_season = get_active_season()
@@ -2000,7 +2071,7 @@ def _run_update_for_ui(*, mode: str) -> FriendlyUpdateResult:
 
         slugs_to_update = [str(lg["slug"]) for lg in pending_leagues]
         update_out = _execute_worker(
-            ["--only", *slugs_to_update, "--json-summary"],
+            ["--only", *slugs_to_update, "--season", active_season, "--json-summary"],
             log_suffix="all_update",
             timeout_sec=7200,
             acquire_lock=False,

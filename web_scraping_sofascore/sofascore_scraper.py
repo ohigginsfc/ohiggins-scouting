@@ -51,7 +51,7 @@ from sofascore_metric_registry import (
 
 # ── DEFAULTS (Chile Primera) ─────────────────────────────────────────────────
 DEFAULT_TOURNAMENT_ID = 11653
-DEFAULT_SEASON_ID = 88493
+DEFAULT_SEASON_ID = 71131  # Chile 2025; 88493 corresponde a 2026.
 DEFAULT_OUTPUT_DIR = Path("sofascore_output")
 
 BASE_URL = "https://www.sofascore.com/api/v1"
@@ -653,6 +653,17 @@ def fetch_json(
     Orden: HTTP (curl_cffi/requests) → Selenium XHR → Selenium GET <pre>.
     Reintentos con backoff 2s / 5s / 10s.
     """
+    if os.environ.get("SOFASCORE_FETCH_MODE") == "http":
+        if delay > 0:
+            time.sleep(delay)
+        response = std_requests.get(url, timeout=25)
+        if response.status_code == 404 and is_expected_missing_player_stats(url, 404, None):
+            _note_expected_missing_player_stats(ctx or get_fetch_context(), url)
+            return None
+        if response.status_code != 200:
+            raise RuntimeError(f"Sofascore HTTP {response.status_code}: {url}")
+        return response.json()
+
     ctx = ctx or get_fetch_context()
     if driver is not None:
         ctx.driver = driver
@@ -808,7 +819,11 @@ def get_all_events(driver, tournament_id: int, season_id: int, *, delay_events: 
         log.info(f"Events page {page} → {url}")
         data = fetch_json(url, delay=delay_events, driver=driver)
 
-        if not data or not data.get("events"):
+        if not isinstance(data, dict) or not isinstance(data.get("events"), list):
+            raise RuntimeError(f"Invalid or unavailable Sofascore calendar page {page}")
+        if not data["events"] and data.get("hasNextPage"):
+            raise RuntimeError(f"Empty Sofascore calendar page {page} with more pages announced")
+        if not data["events"]:
             log.info("  → No more events.")
             break
 
