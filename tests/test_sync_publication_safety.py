@@ -74,6 +74,17 @@ def test_explicit_browser_requires_driver(scraper, monkeypatch):
         scraper.fetch_json('https://example.invalid', delay=0, ctx=scraper.FetchContext())
 
 
+def test_browser_warmup_failure_does_not_mark_session_ready(scraper):
+    from selenium.common.exceptions import TimeoutException
+    ctx = scraper.FetchContext()
+    driver = MagicMock()
+    with patch.object(scraper, 'WebDriverWait') as wait:
+        wait.return_value.until.side_effect = TimeoutException('page not ready')
+        with pytest.raises(TimeoutException):
+            scraper._warmup_browser(driver, ctx)
+    assert not ctx.browser_warmed
+
+
 @pytest.mark.parametrize('ok',[True,False])
 def test_event_publication_only_changes_downloaded_ids_in_checkpoint(db,ok):
     inc=_load_incremental();league=inc.LEAGUES[0]

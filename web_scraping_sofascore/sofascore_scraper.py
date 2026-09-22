@@ -28,6 +28,7 @@ import requests as std_requests
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import NoSuchElementException
 
 try:
@@ -535,7 +536,11 @@ def _warmup_browser(driver: webdriver.Chrome, ctx: FetchContext) -> None:
         return
     log.info("Warming up browser session → %s", SOFASCORE_HOME)
     driver.get(SOFASCORE_HOME)
-    time.sleep(3 if ctx.debug_fetch else 2)
+    WebDriverWait(driver, 25).until(
+        lambda browser: "Sofascore" in browser.title
+        and len(browser.find_element("tag name", "body").text.strip()) > 100,
+        message="Sofascore homepage did not finish loading; browser session is not ready",
+    )
     log.info("Browser title: %s", driver.title)
     snippet = (driver.page_source or "")[:500]
     log.debug("page_source[:500]: %s", snippet)
