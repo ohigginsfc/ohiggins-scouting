@@ -653,6 +653,17 @@ def fetch_json(
     Orden: HTTP (curl_cffi/requests) → Selenium XHR → Selenium GET <pre>.
     Reintentos con backoff 2s / 5s / 10s.
     """
+    if os.environ.get("SOFASCORE_FETCH_MODE") == "http":
+        if delay > 0:
+            time.sleep(delay)
+        response = std_requests.get(url, timeout=25)
+        if response.status_code == 404 and is_expected_missing_player_stats(url, 404, None):
+            _note_expected_missing_player_stats(ctx or get_fetch_context(), url)
+            return None
+        if response.status_code != 200:
+            raise RuntimeError(f"Sofascore HTTP {response.status_code}: {url}")
+        return response.json()
+
     ctx = ctx or get_fetch_context()
     if driver is not None:
         ctx.driver = driver

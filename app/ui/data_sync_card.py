@@ -555,7 +555,7 @@ def _render_technical_details_admin(view: SyncCardViewModel, *, key_prefix: str)
 def render_advanced_sync_options(*, key_prefix: str, disabled: bool = False) -> None:
     """Opciones de mantenimiento (solo Administración / entorno técnico)."""
     active_season = sofascore_incremental_runner.get_active_season()
-    docker_ok = sofascore_incremental_runner.check_docker_runtime().ok
+    docker_ok = sofascore_incremental_runner.check_worker_runtime().ok
     actions_disabled = disabled or not docker_ok
 
     with st.expander("Opciones avanzadas de sincronización", expanded=False):
@@ -645,7 +645,7 @@ def render_admin_sync_section(*, key_prefix: str = "admin") -> None:
     st.caption(
         "Acciones de mantenimiento. El estado habitual se gestiona desde el Dashboard."
     )
-    docker_ok = sofascore_incremental_runner.check_docker_runtime().ok
+    docker_ok = sofascore_incremental_runner.check_worker_runtime().ok
     update_blocked = (
         not docker_ok
         or os.environ.get("DISABLE_SOFASCORE_UPDATE", "").strip() == "1"
@@ -686,7 +686,7 @@ def render_data_sync_card(*, key_prefix: str = "dashboard") -> None:
     """Tarjeta principal compacta de datos deportivos (Dashboard)."""
     plan, ui_state = sofascore_incremental_runner.refresh_sync_card_state()
     in_progress = sofascore_incremental_runner.is_update_in_progress()
-    docker_ok = sofascore_incremental_runner.check_docker_runtime().ok
+    docker_ok = sofascore_incremental_runner.check_worker_runtime().ok
     update_blocked = (
         not docker_ok
         or os.environ.get("DISABLE_SOFASCORE_UPDATE", "").strip() == "1"

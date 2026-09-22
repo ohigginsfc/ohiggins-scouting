@@ -692,7 +692,7 @@ def scrape_candidates(
     downloaded = 0
     errors: list[str] = []
 
-    driver = build_driver(headless=config.headless)
+    driver = None if os.environ.get("SOFASCORE_FETCH_MODE") == "http" else build_driver(headless=config.headless)
     init_fetch_context(debug_fetch=False, driver=driver)
 
     try:
@@ -783,7 +783,8 @@ def scrape_candidates(
 
         save_json(raw_stats, checkpoint_path)
     finally:
-        driver.quit()
+        if driver is not None:
+            driver.quit()
 
     return players_touched, downloaded, errors
 
@@ -839,7 +840,7 @@ def process_league_incremental(
 
     # Fetch current calendar (lightweight vs full season scrape)
     config = scraper_config_for_league(league, no_headless=no_headless)
-    driver = build_driver(headless=config.headless)
+    driver = None if os.environ.get("SOFASCORE_FETCH_MODE") == "http" else build_driver(headless=config.headless)
     init_fetch_context(debug_fetch=False, driver=driver)
     try:
         fetched = get_all_events(
@@ -849,7 +850,8 @@ def process_league_incremental(
             delay_events=config.delay_events,
         )
     finally:
-        driver.quit()
+        if driver is not None:
+            driver.quit()
 
     if not fetched:
         msg = (

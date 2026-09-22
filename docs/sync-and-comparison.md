@@ -23,3 +23,24 @@ El percentil de rendimiento mantiene la inversión de métricas negativas en la 
 ## Validación
 
 `python -m pytest -q` ejecuta las regresiones de sincronización y ranking. Las pruebas PostgreSQL requieren `SCOUTING_TEST_DATABASE_URL` apuntando a una base local desechable llamada `scouting_test`; nunca usan las credenciales operativas del panel.
+
+## Ejecución local sin Docker
+
+El panel y el worker pueden compartir el mismo entorno Python y la base PostgreSQL local. En el `.env` local:
+
+```dotenv
+SOFASCORE_WORKER_MODE=local
+SOFASCORE_IMPORT_MODE=direct
+SOFASCORE_FETCH_MODE=http
+DISABLE_SOFASCORE_UPDATE=0
+```
+
+Reiniciar Streamlit después de cambiar estas variables. El worker usa `sys.executable`, conserva las credenciales `DB_*` y fuerza la importación directa sin Docker. El modo Docker sigue siendo el predeterminado; este cambio no modifica el servidor.
+
+Para una revisión acotada desde el entorno Python del proyecto:
+
+```bash
+python scripts/update_sofascore_incremental.py --only cl_primera_2025 --season 2025 --dry-run --json-summary
+```
+
+Quitar `--dry-run` permite descargar e importar esa liga, únicamente después de comprobar el destino `DB_*`. El modo HTTP no necesita Chrome: informa los errores HTTP del proveedor y no intenta eludirlos usando otros mecanismos de acceso. Un error 403 o 429 impide confirmar sincronización aunque PostgreSQL esté disponible.
