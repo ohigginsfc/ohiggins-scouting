@@ -28,6 +28,7 @@ import requests as std_requests
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import NoSuchElementException
 
 try:
@@ -147,14 +148,6 @@ def build_driver(headless: bool = True) -> webdriver.Chrome:
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--window-size=1920,1080")
-    opts.add_argument("--disable-blink-features=AutomationControlled")
-    opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-    opts.add_experimental_option("useAutomationExtension", False)
-    opts.add_argument(
-        "user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    )
-
     chrome_binary = _resolve_chrome_binary()
     if chrome_binary:
         _require_executable(chrome_binary, label="Chromium")
@@ -174,9 +167,6 @@ def build_driver(headless: bool = True) -> webdriver.Chrome:
         )
         driver = webdriver.Chrome(options=opts)
 
-    driver.execute_script(
-        "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
-    )
     return driver
 
 
@@ -442,6 +432,15 @@ def _http_warmup(session: Any, backend: str) -> None:
         log.debug("HTTP warmup failed (%s): %s", backend, exc)
 
 
+class SofascoreFetchError(RuntimeError):
+    """Transport failure; must never be interpreted as missing sports data."""
+
+
+def _check_access_status(status: int | None, url: str) -> None:
+    if status in {401, 403, 429}:
+        raise SofascoreFetchError(f"Sofascore HTTP {status}: {url}")
+
+
 def fetch_json_requests(
     url: str,
     delay: float = 0.0,
@@ -490,6 +489,7 @@ def fetch_json_requests(
             status_int = (
                 int(meta["status_code"]) if meta["status_code"] is not None else None
             )
+            _check_access_status(status_int, attempt_url)
             if status_int is not None and status_int >= 400:
                 payload = _parse_json_payload(last_raw)
                 if is_expected_missing_player_stats(
@@ -523,6 +523,8 @@ def fetch_json_requests(
                     meta["api_error"] = _api_error_message(json.loads(last_raw))
                 except json.JSONDecodeError:
                     pass
+        except SofascoreFetchError:
+            raise
         except Exception as exc:
             log.warning("HTTP fetch failed (%s) %s: %s", backend, attempt_url, exc)
 
@@ -534,7 +536,11 @@ def _warmup_browser(driver: webdriver.Chrome, ctx: FetchContext) -> None:
         return
     log.info("Warming up browser session → %s", SOFASCORE_HOME)
     driver.get(SOFASCORE_HOME)
-    time.sleep(3 if ctx.debug_fetch else 2)
+    WebDriverWait(driver, 25).until(
+        lambda browser: "Sofascore" in browser.title
+        and len(browser.find_element("tag name", "body").text.strip()) > 100,
+        message="Sofascore homepage did not finish loading; browser session is not ready",
+    )
     log.info("Browser title: %s", driver.title)
     snippet = (driver.page_source or "")[:500]
     log.debug("page_source[:500]: %s", snippet)
@@ -650,7 +656,8 @@ def fetch_json(
 ) -> dict | list | None:
     """
     Obtiene JSON de la API Sofascore.
-    Orden: HTTP (curl_cffi/requests) → Selenium XHR → Selenium GET <pre>.
+    browser: Selenium XHR directamente, sin una petición HTTP previa.
+    auto (predeterminado): HTTP → Selenium XHR → Selenium GET <pre>.
     Reintentos con backoff 2s / 5s / 10s.
     """
     if os.environ.get("SOFASCORE_FETCH_MODE") == "http":
@@ -661,7 +668,7 @@ def fetch_json(
             _note_expected_missing_player_stats(ctx or get_fetch_context(), url)
             return None
         if response.status_code != 200:
-            raise RuntimeError(f"Sofascore HTTP {response.status_code}: {url}")
+            raise SofascoreFetchError(f"Sofascore HTTP {response.status_code}: {url}")
         return response.json()
 
     ctx = ctx or get_fetch_context()
@@ -669,6 +676,9 @@ def fetch_json(
         ctx.driver = driver
     active_driver = ctx.driver
     ctx.last_fetch_expected_missing_stats = False
+    browser_only = os.environ.get("SOFASCORE_FETCH_MODE") == "browser"
+    if browser_only and active_driver is None:
+        raise SofascoreFetchError("SOFASCORE_FETCH_MODE=browser requires a Chrome driver")
 
     for attempt in range(1 + len(RETRY_DELAYS)):
         if attempt > 0:
@@ -676,21 +686,26 @@ def fetch_json(
             log.info("Retry %s/%s after %ss — %s", attempt, len(RETRY_DELAYS), wait, url)
             time.sleep(wait)
 
-        data, _meta = fetch_json_requests(
-            url,
-            delay=delay if attempt == 0 else 0.0,
-            ctx=ctx,
-        )
-        if _meta.get("expected_missing_player_stats"):
-            _note_expected_missing_player_stats(ctx, url)
-            return None
-        if data is not None:
-            return data
+        if not browser_only:
+            data, _meta = fetch_json_requests(
+                url,
+                delay=delay if attempt == 0 else 0.0,
+                ctx=ctx,
+            )
+            _check_access_status(_meta.get("status_code"), url)
+            if _meta.get("expected_missing_player_stats"):
+                _note_expected_missing_player_stats(ctx, url)
+                return None
+            if data is not None:
+                return data
+        elif attempt == 0 and delay > 0:
+            time.sleep(delay)
 
         if active_driver is None:
             continue
 
         raw, xhr_status = _fetch_json_selenium_xhr(active_driver, url, ctx=ctx)
+        _check_access_status(xhr_status, url)
         if xhr_status == 404 and is_expected_missing_player_stats(url, 404, None):
             _note_expected_missing_player_stats(ctx, url)
             return None
@@ -710,6 +725,8 @@ def fetch_json(
                 _note_expected_missing_player_stats(ctx, url)
                 return None
 
+        if browser_only:
+            continue
         raw = _fetch_json_selenium_get(active_driver, url, delay, ctx=ctx)
         if raw:
             data = _parse_json_raw(
@@ -728,7 +745,7 @@ def fetch_json(
             url,
             debug_dir(),
         )
-    return None
+    raise SofascoreFetchError(f"Sofascore fetch failed after retries: {url}")
 
 
 def probe_http_endpoint(url: str) -> dict[str, Any]:

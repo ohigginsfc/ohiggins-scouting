@@ -10,6 +10,7 @@ x-database-environment: &database-environment
 
 x-app-runtime-environment: &app-runtime-environment
   <<: *database-environment
+  SOFASCORE_FETCH_MODE: ${SOFASCORE_FETCH_MODE:-browser}
   SOFASCORE_ACTIVE_SEASON: ${SOFASCORE_ACTIVE_SEASON:-2025}
   SOFASCORE_HISTORICAL_SEASON: ${SOFASCORE_HISTORICAL_SEASON:-2024}
   SCOUTING_USERNAME: ${SCOUTING_USERNAME:?SCOUTING_USERNAME requerido}
@@ -28,6 +29,9 @@ services:
     environment:
       <<: *app-runtime-environment
       PYTHONPATH: /app/src
+      SOFASCORE_WORKER_MODE: local
+      SOFASCORE_IMPORT_MODE: direct
+      SOFASCORE_FETCH_MODE: ${SOFASCORE_FETCH_MODE:-browser}
       COMPOSE_PROJECT_NAME: ohiggins-scouting-prod
       COMPOSE_FILE: /app/docker-compose.ec2.yml
       PROJECT_ROOT: /app
@@ -38,6 +42,9 @@ services:
         condition: service_healthy
       db-init:
         condition: service_completed_successfully
+    volumes:
+      - ./data:/app/data
+      - ./web_scraping_sofascore/sofascore_output:/app/web_scraping_sofascore/sofascore_output
     command:
       - streamlit
       - run
@@ -87,6 +94,7 @@ services:
       PYTHONPATH: /app/src
       SOFASCORE_IMPORT_MODE: direct
       SOFASCORE_ACTIVE_SEASON: ${SOFASCORE_ACTIVE_SEASON:-2025}
+      SOFASCORE_FETCH_MODE: ${SOFASCORE_FETCH_MODE:-browser}
       SOFASCORE_HISTORICAL_SEASON: ${SOFASCORE_HISTORICAL_SEASON:-2024}
       CHROME_BINARY: /usr/bin/chromium
       CHROMEDRIVER_PATH: /usr/bin/chromedriver
