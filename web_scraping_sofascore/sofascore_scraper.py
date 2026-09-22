@@ -808,7 +808,11 @@ def get_all_events(driver, tournament_id: int, season_id: int, *, delay_events: 
         log.info(f"Events page {page} → {url}")
         data = fetch_json(url, delay=delay_events, driver=driver)
 
-        if not data or not data.get("events"):
+        if not isinstance(data, dict) or not isinstance(data.get("events"), list):
+            raise RuntimeError(f"Invalid or unavailable Sofascore calendar page {page}")
+        if not data["events"] and data.get("hasNextPage"):
+            raise RuntimeError(f"Empty Sofascore calendar page {page} with more pages announced")
+        if not data["events"]:
             log.info("  → No more events.")
             break
 

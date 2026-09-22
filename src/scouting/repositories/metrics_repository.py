@@ -14,6 +14,7 @@ from scouting.config.metric_direction import (
     COHORT_RADAR_SCALE_P_HIGH,
     COHORT_RADAR_SCALE_P_LOW,
     linear_percentile_value,
+    is_lower_better_metric,
     performance_percentile_from_raw,
 )
 
@@ -1233,6 +1234,21 @@ def _percentile_rank_among_peers(player_value: float, peer_values: list[float]) 
     return (below + 0.5 * equal) / len(peer_values) * 100.0
 
 
+def _unambiguous_observations(rows: list[dict[str, Any]], keys: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Collapse exact duplicates; omit conflicting or non-finite metric observations."""
+    import math
+
+    grouped: dict[tuple, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(tuple(row.get(k) for k in keys), []).append(row)
+    result = []
+    for group in grouped.values():
+        values = {(float(r["metric_value"]), r.get("metric_unit")) for r in group}
+        if len(values) == 1 and math.isfinite(float(group[0]["metric_value"])):
+            result.append(group[0])
+    return result
+
+
 def get_player_vs_position_percentiles(
     conn: Connection,
     player_id: int,
@@ -1304,6 +1320,7 @@ def get_player_vs_position_percentiles(
         )
         player_rows = list(cur.fetchall())
 
+    player_rows = _unambiguous_observations(player_rows, ("metric_name",))
     player_vals: dict[str, float] = {}
     player_units: dict[str, str | None] = {}
     for r in player_rows:
@@ -1342,7 +1359,7 @@ def get_player_vs_position_percentiles(
                 p.full_name AS player_name,
                 p.position AS player_position,
                 om.raw_payload,
-                om.metric_name,
+                om.metric_name, om.season, om.competition, om.metric_unit,
                 om.metric_value::numeric AS metric_value
             FROM objective_metrics om
             INNER JOIN players p ON p.id = om.player_id
@@ -1352,7 +1369,9 @@ def get_player_vs_position_percentiles(
         )
         cohort_rows = list(cur.fetchall())
 
-    multi_season = bool(cohort_seasons and len(cohort_seasons) > 1)
+    cohort_rows = _unambiguous_observations(
+        cohort_rows, ("player_id", "season", "competition", "metric_name")
+    )
     peer_lists: dict[str, list[float]] = {n: [] for n in names}
     peer_rows_by_metric: dict[str, list[dict[str, Any]]] = {n: [] for n in names}
     peer_players: dict[str, set[int]] = {n: set() for n in names}
@@ -1365,6 +1384,8 @@ def get_player_vs_position_percentiles(
             continue
         mname = str(row["metric_name"])
         if mname not in peer_lists:
+            continue
+        if row.get("metric_unit") != player_units.get(mname):
             continue
         val = float(row["metric_value"])
         peer_lists[mname].append(val)
@@ -1384,12 +1405,15 @@ def get_player_vs_position_percentiles(
         if pval is None:
             continue
         peer_values = peer_lists.get(mname) or []
-        if len(peer_values) < min_peers:
+        if len(peer_players.get(mname) or set()) < min_peers:
             continue
         pct = _percentile_rank_among_peers(pval, peer_values)
         if pct is None:
             continue
-        rank = sum(1 for v in peer_values if v < pval) + 1
+        rank = 1 + sum(
+            v < pval if is_lower_better_metric(mname) else v > pval
+            for v in peer_values
+        )
         players_n = len(peer_players.get(mname) or set())
         cohort_peer_rows = peer_rows_by_metric.get(mname) or []
         out.append(
@@ -1399,7 +1423,8 @@ def get_player_vs_position_percentiles(
                 "percentile": round(pct, 1),
                 "cohort_values": peer_values,
                 "cohort_peer_rows": cohort_peer_rows,
-                "players_count": players_n if multi_season else len(peer_values),
+                "players_count": players_n,
+                "rank_population": len(peer_values) + 1,
                 "cohort_observations": len(peer_values),
                 "cohort_rank": rank,
                 "metric_unit": player_units.get(mname),

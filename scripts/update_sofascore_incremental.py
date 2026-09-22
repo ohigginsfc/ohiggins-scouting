@@ -96,6 +96,7 @@ class LeagueIncrementalResult:
     new_events: int = 0
     updated_events: int = 0
     pending_events: int = 0
+    pending_import: int = 0
     skipped_events: int = 0
     downloaded: int = 0
     errors: int = 0
@@ -850,7 +851,7 @@ def process_league_incremental(
     finally:
         driver.quit()
 
-    if not fetched and not dry_run:
+    if not fetched:
         msg = (
             f"Calendario vacío o no disponible para tournament_id={league.tournament_id} "
             f"season_id={league.season_id}"
@@ -870,7 +871,7 @@ def process_league_incremental(
         print(f"  {teams_reason}" + (f" ({teams_n})" if teams_ok else ""))
 
     with get_connection() as conn:
-        if not force_all_finished:
+        if not force_all_finished and not dry_run:
             bootstrap_ingestion_if_needed(
                 conn, league, season_year, league_dir, merged_events
             )
@@ -895,6 +896,7 @@ def process_league_incremental(
         result.new_events = stats["new_events"]
         result.updated_events = stats["updated_events"]
         result.pending_events = stats["pending_events"]
+        result.pending_import = int(stats.get("already_downloaded") or 0)
         result.skipped_events = stats["skipped_events"]
 
         print_league_dry_run(league, stats)
@@ -908,6 +910,10 @@ def process_league_incremental(
             print("  Nada que descargar.")
             checkpoint = league_dir / "checkpoint_raw.json"
             downloaded_pending = int(stats.get("already_downloaded") or 0)
+            if downloaded_pending > 0 and not checkpoint.is_file():
+                result.errors = 1
+                result.error_messages = ["Hay importaciones pendientes pero falta checkpoint_raw.json; recuperar el checkpoint o ejecutar una recarga explícita."]
+                return result
             if checkpoint.is_file() and (downloaded_pending > 0 or force_all_finished):
                 print("  Continuando con reagregación/importación del checkpoint…")
                 return finalize_league_from_checkpoint(
@@ -990,7 +996,7 @@ def print_final_summary(results: list[LeagueIncrementalResult]) -> None:
 
 
 def result_to_json(r: LeagueIncrementalResult) -> dict:
-    pending = r.new_events + r.updated_events + r.pending_events
+    pending = r.new_events + r.updated_events + r.pending_events + r.pending_import
     return {
         "slug": r.league.output_slug,
         "competition": r.league.competition,
@@ -1001,6 +1007,7 @@ def result_to_json(r: LeagueIncrementalResult) -> dict:
         "new_events": r.new_events,
         "updated_events": r.updated_events,
         "pending_events": r.pending_events,
+        "pending_import": r.pending_import,
         "pending_total": pending,
         "skipped_events": r.skipped_events,
         "downloaded": r.downloaded,

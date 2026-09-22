@@ -780,10 +780,12 @@ def build_player_objective_scouting_table_rows(
         if pct_row and pct_row.get("percentile") is not None:
             pct_num = int(round(float(pct_row["percentile"])))
             pct_disp = f"P{pct_num}"
-            cohort_n = int(pct_row.get("players_count") or 0)
+            cohort_n = int(pct_row.get("rank_population") or 0)
             rank_n = int(pct_row.get("cohort_rank") or 0)
             if cohort_n > 0 and rank_n > 0:
                 rank_disp = f"{rank_n} / {cohort_n}"
+                if int(pct_row.get("cohort_observations") or 0) > int(pct_row.get("players_count") or 0):
+                    rank_disp += " (registros jugador/temporada/liga)"
 
         avg_disp = "—"
         if avg_row and avg_row.get("position_avg_value") is not None:

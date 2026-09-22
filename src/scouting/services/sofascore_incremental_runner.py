@@ -810,6 +810,25 @@ def parse_json_summary(stdout: str) -> dict[str, Any] | None:
     return None
 
 
+def _summary_error(payload: Any) -> str | None:
+    """An exit code alone does not establish that any league was checked."""
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        return "El worker no confirmó un resumen válido y satisfactorio."
+    leagues = payload.get("leagues")
+    if not isinstance(leagues, list) or not leagues:
+        return "El worker no confirmó ninguna competición revisada."
+    for league in leagues:
+        if not isinstance(league, dict) or not league.get("slug"):
+            return "El resumen contiene una competición inválida."
+        for field in ("errors", "pending_total", "total_calendar"):
+            value = league.get(field)
+            if type(value) is not int or value < 0:
+                return "El resumen contiene contadores ausentes o inválidos."
+        if league["errors"] or league.get("error_messages"):
+            return "El worker informó errores en una competición."
+    return None
+
+
 def _log_filename(suffix: str) -> Path:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return LOG_DIR / f"{ts}_{suffix}.log"
@@ -944,7 +963,7 @@ def _execute_worker(
         )
         save_runner_diagnostics(diag)
         json_payload = parse_json_summary(stdout)
-        error_message = None
+        error_message = _summary_error(json_payload) if "--json-summary" in script_args else None
         if proc.returncode != 0:
             if "already in use" in (stdout + stderr).lower():
                 error_message = "Conflicto de contenedores Docker (project name)."
@@ -957,7 +976,7 @@ def _execute_worker(
             else:
                 error_message = f"Error en la ejecución (código {proc.returncode})."
         return WorkerRunOutput(
-            ok=proc.returncode == 0,
+            ok=proc.returncode == 0 and error_message is None,
             command=cmd_str,
             stdout=stdout,
             stderr=stderr,
@@ -2000,7 +2019,7 @@ def _run_update_for_ui(*, mode: str) -> FriendlyUpdateResult:
 
         slugs_to_update = [str(lg["slug"]) for lg in pending_leagues]
         update_out = _execute_worker(
-            ["--only", *slugs_to_update, "--json-summary"],
+            ["--only", *slugs_to_update, "--season", active_season, "--json-summary"],
             log_suffix="all_update",
             timeout_sec=7200,
             acquire_lock=False,
