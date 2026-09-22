@@ -10,7 +10,7 @@ Una ejecución satisfactoria requiere salida JSON válida, al menos una competic
 - La actualización conserva la temporada utilizada en la consulta previa.
 - El panel ejecuta el worker mediante Docker Compose. `DISABLE_SOFASCORE_UPDATE=1` bloquea esa acción. Estas condiciones son independientes de la disponibilidad del proveedor.
 
-Un HTTP 403 del proveedor requiere resolver el acceso permitido desde el entorno de ejecución. Estos cambios no evitan restricciones de acceso ni acreditan una descarga real. Las ligas configuradas deben corresponder a la temporada que se quiere cargar; las entradas existentes son principalmente de 2025.
+La disponibilidad se comprueba desde el transporte y entorno que ejecutarán el worker: una respuesta 403 del cliente HTTP no demuestra que la sesión normal de Chrome falle también. Las ligas configuradas deben corresponder a la temporada que se quiere cargar; las entradas existentes son principalmente de 2025.
 
 ## Ranking frente a la cohorte
 
@@ -31,7 +31,7 @@ El panel y el worker pueden compartir el mismo entorno Python y la base PostgreS
 ```dotenv
 SOFASCORE_WORKER_MODE=local
 SOFASCORE_IMPORT_MODE=direct
-SOFASCORE_FETCH_MODE=http
+SOFASCORE_FETCH_MODE=browser
 DISABLE_SOFASCORE_UPDATE=0
 ```
 
@@ -43,7 +43,9 @@ Para una revisión acotada desde el entorno Python del proyecto:
 python scripts/update_sofascore_incremental.py --only cl_primera_2025 --season 2025 --dry-run --json-summary
 ```
 
-Quitar `--dry-run` permite descargar e importar esa liga, únicamente después de comprobar el destino `DB_*`. El modo HTTP no necesita Chrome: informa los errores HTTP del proveedor y no intenta eludirlos usando otros mecanismos de acceso. Un error 403 o 429 impide confirmar sincronización aunque PostgreSQL esté disponible.
+Quitar `--dry-run` permite descargar e importar esa liga, únicamente después de comprobar el destino `DB_*`.
+
+`browser` utiliza Chrome/Selenium y consulta JSON desde la sesión del navegador, sin ejecutar primero el cliente HTTP. Requiere Chrome/Chromium; Selenium Manager resuelve ChromeDriver localmente si no hay rutas explícitas. `http` utiliza requests sin Chrome. Sin configurar la variable se conserva el flujo `auto`: HTTP y, ante errores recuperables, Selenium. Un 401, 403 o 429 en el transporte seleccionado se informa como error; no se publica como descarga vacía.
 
 ## Identificadores de Chile verificados en el navegador
 
@@ -59,4 +61,4 @@ La configuración anterior etiquetaba 88493 como 2025 y 71131 como 2024. Se corr
 
 No reutilizar checkpoints ni publicaciones anteriores de esos ámbitos sin verificar su temporada: podrían estar etiquetados con un año incorrecto. Esta corrección no acredita que existan datos contaminados ni modifica registros existentes. Los demás torneos todavía requieren contrastar sus identificadores.
 
-La web pública cargó correctamente el club y estadísticas de liga durante la revisión. Eso demuestra disponibilidad de la interfaz web, no acceso autorizado del worker a los endpoints ni una sincronización completa.
+La validación local del modo `browser` recuperó el calendario de Chile 2025 (240 partidos finalizados), las estadísticas de 36 jugadores de O'Higgins–Ñublense (evento 13443447) y permitió importar 734 métricas en un esquema PostgreSQL de prueba aislado. Es una comprobación de descarga e importación de una muestra, no una carga completa de temporada ni una validación del servidor de producción.

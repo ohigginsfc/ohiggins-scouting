@@ -651,7 +651,8 @@ def fetch_json(
 ) -> dict | list | None:
     """
     Obtiene JSON de la API Sofascore.
-    Orden: HTTP (curl_cffi/requests) → Selenium XHR → Selenium GET <pre>.
+    browser: Selenium XHR directamente, sin una petición HTTP previa.
+    auto (predeterminado): HTTP → Selenium XHR → Selenium GET <pre>.
     Reintentos con backoff 2s / 5s / 10s.
     """
     if os.environ.get("SOFASCORE_FETCH_MODE") == "http":
@@ -670,6 +671,9 @@ def fetch_json(
         ctx.driver = driver
     active_driver = ctx.driver
     ctx.last_fetch_expected_missing_stats = False
+    browser_only = os.environ.get("SOFASCORE_FETCH_MODE") == "browser"
+    if browser_only and active_driver is None:
+        raise SofascoreFetchError("SOFASCORE_FETCH_MODE=browser requires a Chrome driver")
 
     for attempt in range(1 + len(RETRY_DELAYS)):
         if attempt > 0:
@@ -677,17 +681,20 @@ def fetch_json(
             log.info("Retry %s/%s after %ss — %s", attempt, len(RETRY_DELAYS), wait, url)
             time.sleep(wait)
 
-        data, _meta = fetch_json_requests(
-            url,
-            delay=delay if attempt == 0 else 0.0,
-            ctx=ctx,
-        )
-        _check_access_status(_meta.get("status_code"), url)
-        if _meta.get("expected_missing_player_stats"):
-            _note_expected_missing_player_stats(ctx, url)
-            return None
-        if data is not None:
-            return data
+        if not browser_only:
+            data, _meta = fetch_json_requests(
+                url,
+                delay=delay if attempt == 0 else 0.0,
+                ctx=ctx,
+            )
+            _check_access_status(_meta.get("status_code"), url)
+            if _meta.get("expected_missing_player_stats"):
+                _note_expected_missing_player_stats(ctx, url)
+                return None
+            if data is not None:
+                return data
+        elif attempt == 0 and delay > 0:
+            time.sleep(delay)
 
         if active_driver is None:
             continue
@@ -713,6 +720,8 @@ def fetch_json(
                 _note_expected_missing_player_stats(ctx, url)
                 return None
 
+        if browser_only:
+            continue
         raw = _fetch_json_selenium_get(active_driver, url, delay, ctx=ctx)
         if raw:
             data = _parse_json_raw(

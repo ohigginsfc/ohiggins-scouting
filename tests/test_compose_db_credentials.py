@@ -181,6 +181,8 @@ def test_ec2_dashboard_worker_runs_inside_app_with_persistent_output():
     app=cfg['services']['app']
     assert app['environment']['SOFASCORE_WORKER_MODE']=='local'
     assert app['environment']['SOFASCORE_IMPORT_MODE']=='direct'
+    assert app['environment']['SOFASCORE_FETCH_MODE']=='browser'
+    assert cfg['services']['sofascore-worker']['environment']['SOFASCORE_FETCH_MODE']=='browser'
     mounts={mount['target'] for mount in app['volumes']}
     assert {'/app/data','/app/web_scraping_sofascore/sofascore_output'} <= mounts
     assert '/var/run/docker.sock' not in mounts

@@ -15,7 +15,7 @@ def scraper(monkeypatch):
     mod=importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules,spec.name,mod)
     spec.loader.exec_module(mod)
-    monkeypatch.setenv('SOFASCORE_FETCH_MODE','browser')
+    monkeypatch.setenv('SOFASCORE_FETCH_MODE','auto')
     monkeypatch.setattr(mod,'RETRY_DELAYS',[])
     return mod
 
@@ -46,6 +46,32 @@ def test_browser_denial_does_not_try_direct_navigation(scraper):
         with pytest.raises(scraper.SofascoreFetchError,match='HTTP 403'):
             scraper.fetch_json('https://example.invalid',delay=0,driver=MagicMock())
     get.assert_not_called()
+
+
+def test_explicit_browser_mode_never_calls_http(scraper, monkeypatch):
+    monkeypatch.setenv('SOFASCORE_FETCH_MODE', 'browser')
+    with patch.object(scraper, 'fetch_json_requests') as http, \
+         patch.object(scraper, '_fetch_json_selenium_xhr', return_value=('{"events":[{"id":123}]}', 200)):
+        assert scraper.fetch_json('https://example.invalid', delay=0, driver=MagicMock()) == {'events':[{'id':123}]}
+    http.assert_not_called()
+
+
+@pytest.mark.parametrize('status', [401, 403, 429])
+def test_explicit_browser_mode_reports_denial(scraper, monkeypatch, status):
+    monkeypatch.setenv('SOFASCORE_FETCH_MODE', 'browser')
+    with patch.object(scraper, 'fetch_json_requests') as http, \
+         patch.object(scraper, '_fetch_json_selenium_xhr', return_value=(None, status)), \
+         patch.object(scraper, '_fetch_json_selenium_get') as get:
+        with pytest.raises(scraper.SofascoreFetchError, match=f'HTTP {status}'):
+            scraper.fetch_json('https://example.invalid', delay=0, driver=MagicMock())
+    http.assert_not_called()
+    get.assert_not_called()
+
+
+def test_explicit_browser_requires_driver(scraper, monkeypatch):
+    monkeypatch.setenv('SOFASCORE_FETCH_MODE', 'browser')
+    with pytest.raises(scraper.SofascoreFetchError, match='requires a Chrome driver'):
+        scraper.fetch_json('https://example.invalid', delay=0, ctx=scraper.FetchContext())
 
 
 @pytest.mark.parametrize('ok',[True,False])
