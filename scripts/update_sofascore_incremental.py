@@ -315,6 +315,9 @@ def finalize_league_from_checkpoint(
     backup: bool = True,
 ) -> LeagueIncrementalResult:
     """checkpoint_raw → teams.json → reagregar → validar → stage → import PostgreSQL."""
+    if result.errors:
+        print("Publicación omitida: la descarga tiene errores; conservar checkpoint para reanudar.")
+        return result
     from scouting.services.sofascore_teams_rebuild import ensure_teams_json
 
     league_dir = league_output_dir(root, league)

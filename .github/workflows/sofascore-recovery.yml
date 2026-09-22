@@ -1,0 +1,78 @@
+name: Sofascore encrypted recovery
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [probe, collect, validate]
+        default: probe
+      season:
+        type: choice
+        options: ['2024', '2025']
+        default: '2024'
+      checkpoint:
+        description: 'new (explicit fresh start), latest, or prior collection run ID'
+        type: string
+        default: new
+      refresh:
+        description: 'Explicitly discard previous season collection and download again'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: sofascore-recovery
+  cancel-in-progress: false
+jobs:
+  recover:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      SOFASCORE_ARTIFACT_KEY: ${{ secrets.SOFASCORE_ARTIFACT_KEY }}
+      GH_TOKEN: ${{ github.token }}
+      RECOVERY_MODE: ${{ inputs.mode }}
+      RECOVERY_SEASON: ${{ inputs.season }}
+      RECOVERY_CHECKPOINT: ${{ inputs.checkpoint }}
+      RECOVERY_REFRESH: ${{ inputs.refresh }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require encryption key
+        run: test -n "$SOFASCORE_ARTIFACT_KEY"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt -r web_scraping_sofascore/requirements-scraper.txt
+      - name: Restore checkpoint on host
+        run: |
+          mkdir -p data/recovery/output
+          if [ "$RECOVERY_CHECKPOINT" != new ]; then
+            python -c 'import sys; sys.path.insert(0,"scripts"); from sofascore_recovery import download_checkpoint; import os; download_checkpoint(os.environ["RECOVERY_CHECKPOINT"],os.environ["RECOVERY_SEASON"],"data/recovery/input.sofa")'
+          fi
+      - name: Build worker
+        run: docker compose -f docker-compose.recovery.yml build collector
+      - name: Check Selenium runtime
+        run: docker compose -f docker-compose.recovery.yml run --rm --entrypoint python collector scripts/test_selenium_runtime.py
+      - name: Collect or validate
+        run: |
+          args=(run --mode "$RECOVERY_MODE" --season "$RECOVERY_SEASON" --checkpoint "$RECOVERY_CHECKPOINT")
+          if [ "$RECOVERY_CHECKPOINT" != new ]; then args+=(--input-package /app/data/recovery/input.sofa); fi
+          if [ "$RECOVERY_REFRESH" = true ]; then args+=(--refresh); fi
+          docker compose -f docker-compose.recovery.yml run --rm collector "${args[@]}"
+      - name: Report completion state
+        if: always()
+        run: |
+          if [ -f data/recovery/output/summary.json ]; then
+            echo '### Recovery state' >> "$GITHUB_STEP_SUMMARY"
+            cat data/recovery/output/summary.json >> "$GITHUB_STEP_SUMMARY"
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Only validated means complete. Partial is resumable, not importable.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sofascore-recovery-${{ inputs.season }}-${{ inputs.mode == 'probe' && 'probe' || 'collect' }}
+          path: data/recovery/output/recovery.sofa
+          retention-days: 90
+          if-no-files-found: warn

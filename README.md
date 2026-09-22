@@ -39,6 +39,11 @@ modo claro/oscuro del sistema operativo ni del navegador.
 
 ## Datos demo y datos reales
 
+Para recuperar Chile 2024/2025 desde GitHub Actions sin consultar Sofascore desde
+el portátil, usar el [worker de recuperación cifrada](docs/sofascore-recovery.md).
+Genera checkpoints reanudables y paquetes completos importables localmente;
+no conecta Actions a PostgreSQL ni despliega en el servidor del club.
+
 Con demo, el Dashboard ofrece **Descargar datos reales** (histórico 2024 + temporada activa).
 Después: **Buscar nuevos partidos** (incremental, solo temporada activa).
 Los demo se conservan y no se mezclan con datos reales.

@@ -3,6 +3,8 @@
 .gitignore
 .gitattributes
 .github
+.local_checks
+data/recovery
 
 # Secretos y entornos
 .env

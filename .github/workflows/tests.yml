@@ -48,3 +48,9 @@ jobs:
           DISABLE_SOFASCORE_UPDATE=1
           EOF
       - run: python -m pytest -q
+      - name: Build isolated recovery worker and check Selenium
+        env:
+          SOFASCORE_ARTIFACT_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+        run: |
+          docker compose -f docker-compose.recovery.yml build collector
+          docker compose -f docker-compose.recovery.yml run --rm --entrypoint python collector scripts/test_selenium_runtime.py
