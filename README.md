@@ -154,7 +154,7 @@ tests/
 ## Producción: dashboard conectado a Supabase
 
 Servidor del club: [http://34.247.191.149:18501/](http://34.247.191.149:18501/).
-Lucas debe ejecutar los siguientes pasos en ese servidor. El merge del repositorio
+El administrador del sitio web debe ejecutar los siguientes pasos en ese servidor. El merge del repositorio
 no actualiza por sí solo la web ni cambia su conexión.
 
 ### 1. Actualizar el código
