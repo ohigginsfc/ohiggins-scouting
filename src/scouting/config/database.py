@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
+from psycopg.conninfo import conninfo_to_dict
 
 from dotenv import load_dotenv
 
@@ -15,6 +17,10 @@ load_dotenv(_PROJECT_ROOT / ".env", override=False)
 
 def get_db_connection_params() -> dict[str, object]:
     """Return keyword arguments for psycopg.connect (no credentials hardcoded)."""
+    url = os.environ.get("SCOUTING_DATABASE_URL", "").strip()
+    if url:
+        params = conninfo_to_dict(url)
+        return _with_schema(params)
     host = os.environ.get("DB_HOST")
     port = os.environ.get("DB_PORT", "5432")
     dbname = os.environ.get("DB_NAME")
@@ -34,10 +40,20 @@ def get_db_connection_params() -> dict[str, object]:
     if missing:
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
-    return {
+    return _with_schema({
         "host": host,
         "port": int(port),
         "dbname": dbname,
         "user": user,
         "password": password,
-    }
+    })
+
+
+def _with_schema(params: dict[str, object]) -> dict[str, object]:
+    schema = os.environ.get("DB_SCHEMA", "").strip()
+    if schema:
+        if not re.fullmatch(r"[a-z_][a-z0-9_]*", schema):
+            raise ValueError("DB_SCHEMA must be a lowercase PostgreSQL identifier")
+        params["options"] = (str(params.get("options", "")) + f" -c search_path={schema}").strip()
+    params.setdefault("connect_timeout", 15)
+    return params

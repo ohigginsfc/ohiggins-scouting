@@ -1,0 +1,33 @@
+name: Verify scouting database
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      SCOUTING_DATABASE_URL: ${{ secrets.SCOUTING_DATABASE_URL }}
+      DB_SCHEMA: scouting
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install 'psycopg[binary]==3.2.6' python-dotenv
+      - name: Verify schema and published coverage without writes
+        run: |
+          python - <<'PY'
+          import json, os
+          from scouting.db import get_connection
+          assert os.environ.get('SCOUTING_DATABASE_URL'), 'SCOUTING_DATABASE_URL secret required'
+          with get_connection() as conn:
+              conn.execute('SET TRANSACTION READ ONLY')
+              assert conn.execute('SELECT current_schema()').fetchone()[0] == 'scouting'
+              metrics = conn.execute('SELECT season,count(*) FROM objective_metrics GROUP BY season ORDER BY season').fetchall()
+              coverage = conn.execute('SELECT season,processing_status,count(*) FROM sofascore_event_ingestion GROUP BY season,processing_status ORDER BY season,processing_status').fetchall()
+              print(json.dumps({'metrics':metrics,'coverage':coverage}))
+          PY
