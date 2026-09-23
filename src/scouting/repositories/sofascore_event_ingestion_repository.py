@@ -14,6 +14,22 @@ SOURCE_NAME = "Sofascore"
 VALID_STATUSES = frozenset({"pending", "downloaded", "processed", "failed", "skipped"})
 
 
+def list_incomplete_coverage(conn: Connection) -> list[dict[str, Any]]:
+    """Coverage of finished events in scopes with a published real-data batch."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("""
+            SELECT competition, season, COUNT(*) AS expected,
+                   COUNT(*) FILTER (WHERE processing_status = 'processed' AND import_batch_id IS NOT NULL) AS processed
+            FROM sofascore_event_ingestion
+            WHERE source_name = %s AND status = 'finished'
+            GROUP BY country, division, competition, season
+            HAVING COUNT(*) FILTER (WHERE processing_status = 'processed' AND import_batch_id IS NOT NULL) > 0
+               AND COUNT(*) FILTER (WHERE processing_status = 'processed' AND import_batch_id IS NOT NULL) < COUNT(*)
+            ORDER BY season, competition
+        """, (SOURCE_NAME,))
+        return [dict(row) for row in cur.fetchall()]
+
+
 def list_events_for_scope(
     conn: Connection,
     *,

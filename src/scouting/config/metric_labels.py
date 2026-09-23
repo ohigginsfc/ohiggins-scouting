@@ -384,7 +384,7 @@ _CAMEL_RE = re.compile(r"([a-z0-9])([A-Z])")
 
 
 def format_season_label(season: str | None) -> str:
-    """2025 → 2025-2026; temporadas con guión se dejan igual."""
+    """Preserve the provider's season: calendar years are not split seasons."""
     if season is None:
         return "—"
     s = str(season).strip()
@@ -392,9 +392,6 @@ def format_season_label(season: str | None) -> str:
         return "—"
     if "-" in s:
         return s
-    if re.fullmatch(r"\d{4}", s):
-        y = int(s)
-        return f"{y}-{y + 1}"
     return s
 
 
