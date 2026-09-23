@@ -4682,6 +4682,17 @@ def main() -> None:
 
     render_page_heading(page)
 
+    if page in {"Dashboard", "Consultar jugador", "Comparación", "Datos objetivos"}:
+        from scouting.repositories.sofascore_event_ingestion_repository import list_incomplete_coverage
+        with get_connection() as conn:
+            incomplete = list_incomplete_coverage(conn)
+        for coverage in incomplete:
+            st.warning(
+                f"Cobertura parcial de Sofascore · {coverage['competition']} {coverage['season']}: "
+                f"{coverage['processed']}/{coverage['expected']} partidos registrados con datos importados. "
+                "Los totales excluyen los encuentros pendientes; no se cuentan como ceros."
+            )
+
     if page == "Dashboard":
         _render_dashboard()
     elif page == "Nuevo informe":
