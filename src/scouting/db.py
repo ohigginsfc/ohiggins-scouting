@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import os
 from typing import Iterator
 
 import psycopg
@@ -14,7 +15,18 @@ from scouting.config.database import get_db_connection_params
 def get_connection() -> Connection:
     """Open a new PostgreSQL connection. Caller is responsible for closing (or use context manager)."""
     params = get_db_connection_params()
-    return psycopg.connect(**params)
+    conn = psycopg.connect(**params)
+    schema = os.environ.get("DB_SCHEMA", "").strip()
+    if schema:
+        try:
+            actual = conn.execute("SELECT current_schema()").fetchone()[0]
+            conn.commit()
+            if actual != schema:
+                raise ValueError("Configured DB_SCHEMA is absent or inaccessible")
+        except Exception:
+            conn.close()
+            raise
+    return conn
 
 
 @contextmanager

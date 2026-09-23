@@ -1,6 +1,7 @@
 # ── Secretos y entorno ──
 .env
 .env.local
+.env.scouting-production
 .env.*.local
 !.env.example
 !.env.ec2.example
