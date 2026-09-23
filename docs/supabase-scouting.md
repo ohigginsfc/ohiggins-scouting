@@ -1,5 +1,36 @@
 # PostgreSQL remoto con esquema scouting
 
+## Desplegar el dashboard con Supabase
+
+Usar el archivo independiente `docker-compose.supabase.yml` (no combinarlo con
+el Compose local o EC2). Arranca únicamente Streamlit, conectado al esquema
+existente: no levanta otro PostgreSQL ni ejecuta migraciones o datos demo.
+
+En el `.env` privado del servidor configurar `SCOUTING_DATABASE_URL` con la
+credencial de scouting y `sslmode=require`, `SCOUTING_USERNAME`,
+`SCOUTING_PASSWORD_HASH` y opcionalmente `SCOUTING_APP_PORT` (por defecto 18501).
+Escapar cada `$` del hash bcrypt como `$$` para la interpolación de Compose.
+No copiar las credenciales en el repositorio ni en una imagen Docker.
+
+```bash
+git pull --ff-only
+docker compose -f docker-compose.supabase.yml config -q
+docker compose -f docker-compose.supabase.yml up -d --build app
+docker compose -f docker-compose.supabase.yml exec -T app python -c "from scouting.db import get_connection; c=get_connection(); c.execute('SET TRANSACTION READ ONLY'); print('schema, metrics:', c.execute('SELECT current_schema(), count(*) FROM objective_metrics').fetchone()); c.close()"
+```
+
+La última comprobación debe indicar `scouting` y el número de métricas remoto.
+Abrir `http://IP_DEL_SERVIDOR:18501` o el dominio configurado por el administrador.
+Si otra instalación ocupa ese puerto, coordinar su parada o elegir otro puerto;
+conservar sus volúmenes de PostgreSQL como respaldo.
+
+Este despliegue mantiene desactivada la descarga desde la interfaz hasta validar
+la sincronización incremental. No programa un cron. Publicar este archivo en
+GitHub no reinicia una web existente: el administrador debe ejecutar estos
+comandos en el servidor con sus variables privadas.
+
+## Conexión y permisos
+
 La aplicación y los importadores admiten `SCOUTING_DATABASE_URL` como conexión
 PostgreSQL completa (URI o formato libpq). Si está definida, tiene prioridad sobre
 las variables locales `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` y `DB_PASSWORD`.
