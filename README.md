@@ -151,7 +151,97 @@ docs/                     # Despliegue EC2
 tests/
 ```
 
-## Despliegue EC2
+## Producción: dashboard conectado a Supabase
+
+Servidor del club: [http://34.247.191.149:18501/](http://34.247.191.149:18501/).
+Lucas debe ejecutar los siguientes pasos en ese servidor. El merge del repositorio
+no actualiza por sí solo la web ni cambia su conexión.
+
+### 1. Actualizar el código
+
+Dentro del checkout existente, conservar el `.env` privado y comprobar que no hay
+cambios locales pendientes antes de actualizar:
+
+```bash
+git status --short
+git switch main
+git pull --ff-only
+```
+
+Si aún no hay un checkout, clonarlo:
+
+```bash
+git clone https://github.com/ohigginsfc/ohiggins-scouting.git
+cd ohiggins-scouting
+```
+
+### 2. Configurar el `.env` del servidor
+
+Crear o editar `.env` en la raíz del checkout, manteniendo las credenciales de
+acceso actuales del dashboard. Añadir o actualizar:
+
+```dotenv
+SCOUTING_DATABASE_URL='<conexion PostgreSQL privada del rol scouting_runtime con sslmode=require>'
+DB_SCHEMA=scouting
+SCOUTING_APP_PORT=18501
+SCOUTING_USERNAME=<usuario del dashboard>
+SCOUTING_PASSWORD_HASH='<hash bcrypt del dashboard; cada $ escapado como $$>'
+```
+
+Obtener la conexión del responsable del proyecto por un canal privado. Debe ser
+la conexión **PostgreSQL Session pooler del rol dedicado a scouting**, no la URL
+web de Supabase, una API key, ni una credencial administrativa de COMET. No pegar
+estos valores en GitHub, issues, capturas o logs. El secret de Actions no se
+transfiere automáticamente al servidor. El Compose inyecta `DB_SCHEMA=scouting`
+y las temporadas 2026/2025 explícitamente.
+
+```bash
+chmod 600 .env
+docker compose -f docker-compose.supabase.yml config -q
+docker compose -f docker-compose.supabase.yml build app
+```
+
+### 3. Sustituir la instancia anterior
+
+Identificar qué servicio ocupa el puerto 18501 y detener solo la instancia
+anterior de scouting. Si se desplegó con el Compose EC2 de este repositorio,
+ejecutar desde su checkout original (y con su mismo nombre de proyecto):
+
+```bash
+docker compose -f docker-compose.ec2.yml stop app
+```
+
+Si usa otro gestor o nombre de proyecto, detener esa instancia con su mecanismo
+original. No borrar volúmenes ni ejecutar `down -v`: la BD anterior se conserva
+como respaldo. Con el puerto libre, desde el checkout actualizado:
+
+```bash
+docker compose -f docker-compose.supabase.yml up -d app
+docker compose -f docker-compose.supabase.yml ps
+```
+
+Este archivo es independiente: **no combinarlo con el Compose EC2 o local**.
+Inicia Streamlit sin PostgreSQL local, migraciones ni seed demo. Mantiene la
+descarga desde la interfaz desactivada mientras se valida la sincronización
+incremental; la lectura y comparación de datos remotos están disponibles.
+
+### 4. Verificar la conexión real
+
+```bash
+docker compose -f docker-compose.supabase.yml exec -T app python -c "from scouting.db import get_connection; c=get_connection(); c.execute('SET TRANSACTION READ ONLY'); print('schema, metrics:', c.execute('SELECT current_schema(), count(*) FROM objective_metrics').fetchone()); c.close()"
+curl --fail http://127.0.0.1:18501/_stcore/health
+```
+
+La consulta debe mostrar `scouting` y actualmente 59.379 métricas; el conteo puede
+cambiar tras nuevas publicaciones. El healthcheck debe responder `ok`, pero por
+sí solo no valida la BD. Abrir la URL del servidor, iniciar sesión y comprobar
+Dashboard y Comparación. La cobertura parcial de 2024 debe seguir visible.
+
+Si la nueva instancia falla, detenerla con
+`docker compose -f docker-compose.supabase.yml stop app` y volver a arrancar
+la aplicación anterior con su configuración y gestor originales.
+
+### Otras opciones de despliegue
 
 Para producción con la BD existente en Supabase, utilizar
 [`docker-compose.supabase.yml`](docker-compose.supabase.yml) y seguir la
