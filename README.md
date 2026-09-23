@@ -241,6 +241,79 @@ Si la nueva instancia falla, detenerla con
 `docker compose -f docker-compose.supabase.yml stop app` y volver a arrancar
 la aplicación anterior con su configuración y gestor originales.
 
+## Actualizar los datos desde una máquina local
+
+La extracción manual se ejecuta en la máquina del operador con Docker Desktop
+activo (o Docker Engine en Linux), no en el servidor web. Supabase puede seguir
+sirviendo la última publicación mientras se prepara la siguiente. No hay que
+activar una VPN por defecto: la descarga local anterior funcionó sin ella.
+
+### Preparar y comprobar el worker
+
+Actualizar el checkout local de `main`. Para las pruebas aisladas, configurar
+en el `.env` privado `SOFASCORE_ARTIFACT_KEY`: una clave base64 de 32 bytes,
+conservada entre ejecuciones para poder descifrar los checkpoints. Puede usarse
+la copia privada existente; no regenerarla si ya hay paquetes que dependan de ella.
+
+```bash
+docker compose -f docker-compose.recovery.yml build collector
+docker compose -f docker-compose.recovery.yml run --rm --entrypoint python collector scripts/test_selenium_runtime.py
+docker compose -f docker-compose.recovery.yml run --rm collector run --mode probe --season 2025 --transport http --checkpoint new --output /app/data/recovery/probe-2025
+```
+
+El primer test comprueba Selenium sin consultar al proveedor. El segundo prueba
+acceso real y debe mostrar `probe_ok: true`; no publica nada en PostgreSQL.
+Este worker aislado no recibe credenciales de Supabase. Ante 401/403/429 detener
+la extracción y conservar el checkpoint; un contenedor sano no garantiza acceso
+a Sofascore.
+
+### Recuperar un histórico solo cuando sea necesario
+
+2024 y 2025 ya están publicados: no repetir su descarga completa para una
+actualización ordinaria. Si hay que reconstruir 2025, el recolector versionado
+permite comenzar y luego reanudar por lotes:
+
+```bash
+docker compose -f docker-compose.recovery.yml run --rm collector run --mode collect --season 2025 --transport http --checkpoint new --output /app/data/recovery/manual-2025
+docker compose -f docker-compose.recovery.yml run --rm collector run --mode collect --season 2025 --transport http --input-package /app/data/recovery/manual-2025/recovery.sofa --output /app/data/recovery/manual-2025
+```
+
+Ejecutar el primer comando una sola vez; repetir el segundo mientras el estado
+sea `partial`. El archivo persiste en `data/recovery/manual-2025/recovery.sofa`
+del host. No usar `--refresh` para reanudar. Consultar la
+[guía de recuperación](docs/sofascore-recovery.md) para validación y aplicación
+en una BD local de prueba. Su opción `local --apply` **no publica en Supabase**.
+Un paquete 2024 con el partido pendiente tampoco satisface la validación de
+temporada completa de ese recolector.
+
+### Actualización manual de 2026: paso pendiente de integrar
+
+La descarga y publicación inicial de 2026 están realizadas, pero todavía no hay
+un comando versionado y validado que repita de punta a punta la actualización
+incremental hacia Supabase. Los scripts privados de recuperación inicial no se
+distribuyen con un `git clone`. Antes de entregar este paso como operativo:
+
+1. Configurar la temporada Sofascore `88493` del torneo `11653` y un ámbito
+   explícito Chile/Primera/2026. El pipeline incremental actual configura Chile
+   2025; pasar `--season 2026` no cambia por sí solo el ID remoto del torneo.
+2. Incorporar el checkpoint completo del corte ya publicado. Descargar los
+   partidos nuevos y volver a revisar una ventana reciente para correcciones;
+   mantener los históricos y los partidos ya recogidos.
+3. Validar IDs, temporada, cobertura y estadísticas; guardar un candidato
+   completo y trazable. No sustituir una temporada por un CSV que solo contenga
+   los partidos nuevos, ni asumir que el checksum del calendario detecta todos
+   los cambios de estadísticas.
+4. Respaldar el ámbito de destino y publicar métricas y estados de ingestión en
+   una transacción con la credencial de `scouting`, conservando la publicación
+   anterior si falla la validación o la importación.
+5. Verificar la nueva cobertura, el lote de importación y las comparaciones del
+   dashboard antes de dar la actualización por terminada.
+
+Estos pasos describen el trabajo pendiente, no comandos ya habilitados. Hasta
+validarlo, mantener `DISABLE_SOFASCORE_UPDATE=1` en producción y conservar el
+corte existente. La programación semanal se decidirá después de disponer de una
+actualización manual reproducible.
+
 ### Otras opciones de despliegue
 
 Para producción con la BD existente en Supabase, utilizar
