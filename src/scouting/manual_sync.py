@@ -175,6 +175,9 @@ def guard_existing(conn, state):
     latest = conn.execute("""SELECT max(scraped_at) FROM sofascore_event_ingestion
         WHERE country='cl' AND division='primera' AND competition=%s AND season=2026
         AND processing_status='processed'""", (r.COMPETITION,)).fetchone()[0]
+    # The existing migration stores scraped_at as timestamp without time zone.
+    if latest and latest.tzinfo is None:
+        latest = latest.replace(tzinfo=timezone.utc)
     if latest and latest > datetime.fromisoformat(state['cutoff']):
         raise ValueError('A newer publication exists; collect again')
 
@@ -215,7 +218,8 @@ def publish(folder, *, apply=False):
                 home_team=event['homeTeam']['name'], away_team=event['awayTeam']['name'],
                 event_date=r.scraper.event_datetime_utc(event), status='finished', has_lineups=True,
                 checksum=state['matches'][eid]['checksum'], processing_status='processed',
-                scraped_at=datetime.fromisoformat(state['cutoff']), import_batch_id=batch_id, commit=False)
+                scraped_at=datetime.fromisoformat(state['cutoff']).astimezone(timezone.utc).replace(tzinfo=None),
+                import_batch_id=batch_id, commit=False)
     with get_connection() as conn:
         batch, stats = import_dataframe(conn, frame, **SCOPE, source_file='manual-sync:'+digest,
                                        replace=True, publication_hook=hook)
