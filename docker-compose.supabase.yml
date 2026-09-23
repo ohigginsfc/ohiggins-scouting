@@ -1,0 +1,29 @@
+name: ohiggins-scouting-cloud
+
+# Despliegue independiente: utiliza la BD existente, sin init ni seed demo.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${SCOUTING_APP_PORT:-18501}:8501"
+    environment:
+      PYTHONPATH: /app/src
+      SCOUTING_DATABASE_URL: ${SCOUTING_DATABASE_URL:?Configurar la conexion PostgreSQL de scouting con sslmode=require}
+      DB_SCHEMA: scouting
+      SCOUTING_USERNAME: ${SCOUTING_USERNAME:?SCOUTING_USERNAME requerido}
+      SCOUTING_PASSWORD_HASH: ${SCOUTING_PASSWORD_HASH:?SCOUTING_PASSWORD_HASH requerido}
+      SOFASCORE_ACTIVE_SEASON: "2026"
+      SOFASCORE_HISTORICAL_SEASON: "2025"
+      DISABLE_SOFASCORE_UPDATE: "1"
+      SCOUTING_DEBUG_MODE: "0"
+      SHOW_ADMIN_TAB: "0"
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: ["streamlit", "run", "app/streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]

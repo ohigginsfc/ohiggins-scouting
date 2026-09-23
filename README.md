@@ -3,6 +3,63 @@
 Plataforma de scouting deportivo: informes subjetivos, estadísticas objetivas,
 comparación entre temporadas y actualización de datos desde la interfaz.
 
+## Base de datos y operación
+
+La aplicación puede utilizar PostgreSQL local o PostgreSQL en Supabase. La base
+remota utiliza el esquema `scouting` y una credencial propia; COMET conserva sus
+tablas separadas. Supabase aloja los datos, no la aplicación Streamlit.
+
+La conexión se selecciona al iniciar el proceso:
+
+- `SCOUTING_DATABASE_URL` tiene prioridad sobre las variables `DB_*`.
+- Para Supabase, configurar también `DB_SCHEMA=scouting` y `sslmode=require`
+  en la conexión. Usar el Session pooler cuando se necesite conectividad IPv4.
+- Fuera de Docker, la aplicación carga `.env` automáticamente. Un archivo como
+  `.env.scouting-production` **no se carga por su nombre**: sus variables deben
+  cargarse explícitamente en el entorno antes de iniciar Streamlit.
+- Tener los datos publicados en Supabase no cambia la conexión de una aplicación
+  que ya está ejecutándose. Tras cambiar el entorno, reiniciar Streamlit.
+
+Consultar [configuración y permisos de Supabase](docs/supabase-scouting.md).
+No versionar conexiones ni contraseñas.
+
+### Cobertura publicada
+
+La publicación remota verificada el 23 de septiembre de 2026 contiene únicamente
+datos reales, con esta cobertura:
+
+| Temporada | Partidos con estadísticas / esperados | Registros de métricas |
+|-----------|--------------------------------------|-----------------------|
+| 2024 | 239 / 240 | 18.353 |
+| 2025 | 240 / 240 | 19.607 |
+| 2026, corte del 22 de septiembre de 2026 a las 23:35 UTC | 183 / 183 | 21.419 |
+
+El partido Unión La Calera–Cobresal de 2024 (`12021741`) sigue pendiente:
+Sofascore devolvió 404 para sus alineaciones. No se sustituye por ceros; la
+interfaz advierte la cobertura parcial. El corte de 2026 incluye partidos
+finalizados al recogerlos, con inicio anterior al corte.
+
+### Extracción y automatización
+
+El worker Docker local ha permitido descargar datos con el cliente HTTP original
+basado en `curl_cffi`, sin VPN en esa ejecución. En un runner alojado por GitHub,
+la prueba del mismo código original y de la misma versión de `curl_cffi` recibió
+403 tanto en la portada como en los dos hosts de la API, incluso continuando
+después del fallo de la portada.
+
+Docker reproduce el entorno de software, pero no la conexión de salida a
+Internet. El origen de red es una hipótesis principal para esta diferencia;
+las pruebas no demuestran que la IP sea la única causa.
+
+- [Prueba HTTP desde GitHub Actions](https://github.com/ohigginsfc/ohiggins-scouting/actions/runs/35831454593): rechazada por el proveedor, sin escrituras en la BD.
+- [Verificación de Supabase desde Actions](https://github.com/ohigginsfc/ohiggins-scouting/actions/runs/35829941551): conexión y lectura correctas.
+
+**La sincronización semanal todavía no está activa.** Queda integrar y validar
+el recorrido incremental de 2026 hasta su publicación atómica en Supabase y
+programarlo en un entorno con acceso comprobado a Sofascore. Un runner propio
+es una alternativa pendiente de configurar y probar. Los históricos 2024/2025
+se conservan; no necesitan una descarga completa cada semana.
+
 ## Requisitos
 
 - Docker
@@ -39,20 +96,25 @@ modo claro/oscuro del sistema operativo ni del navegador.
 
 ## Datos demo y datos reales
 
-Para recuperar Chile 2024/2025 desde GitHub Actions sin consultar Sofascore desde
-el portátil, usar el [worker de recuperación cifrada](docs/sofascore-recovery.md).
-Genera checkpoints reanudables y paquetes completos importables localmente;
-no conecta Actions a PostgreSQL ni despliega en el servidor del club.
+El [worker de recuperación cifrada](docs/sofascore-recovery.md) permite intentar
+la recuperación de Chile 2024/2025 y genera checkpoints reanudables y paquetes
+completos importables localmente. Su extracción depende del acceso a Sofascore:
+la prueba actual en runners alojados por GitHub devuelve 403. Este workflow de
+recuperación no publica en PostgreSQL ni despliega la aplicación.
 
 Con demo, el Dashboard ofrece **Descargar datos reales** (histórico 2024 + temporada activa).
 Después: **Buscar nuevos partidos** (incremental, solo temporada activa).
 Los demo se conservan y no se mezclan con datos reales.
+Estos controles no implican que la sincronización semanal de 2026 ya esté
+configurada o validada.
 
 ## Variables
 
 | Variable | Descripción |
 |----------|-------------|
 | `DB_*` | PostgreSQL |
+| `SCOUTING_DATABASE_URL` | Conexión PostgreSQL completa; tiene prioridad sobre `DB_*` |
+| `DB_SCHEMA` | Esquema PostgreSQL; usar `scouting` para la base remota |
 | `SCOUTING_USERNAME` / `SCOUTING_PASSWORD_HASH` | Acceso (hash bcrypt; cada `$` como `$$` en `.env`) |
 | `SOFASCORE_ACTIVE_SEASON` | Temporada activa |
 | `SOFASCORE_HISTORICAL_SEASON` | Temporada histórica |
@@ -90,6 +152,12 @@ tests/
 ```
 
 ## Despliegue EC2
+
+Para producción con la BD existente en Supabase, utilizar
+[`docker-compose.supabase.yml`](docker-compose.supabase.yml) y seguir la
+[guía de despliegue con Supabase](docs/supabase-scouting.md).
+
+Para una instalación con PostgreSQL propio en el servidor:
 
 [`docs/ec2-deployment.md`](docs/ec2-deployment.md) · `docker-compose.ec2.yml`
 
