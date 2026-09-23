@@ -1,0 +1,17 @@
+name: scouting-manual-sync
+x-worker: &worker
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.scraper
+  volumes:
+    - ./data/recovery:/app/data/recovery
+  entrypoint: ["python", "scripts/manual_scouting_sync.py"]
+services:
+  collector:
+    <<: *worker
+  publisher:
+    <<: *worker
+    profiles: ["publish"]
+    environment:
+      SCOUTING_DATABASE_URL: ${SCOUTING_DATABASE_URL:-}
+      DB_SCHEMA: scouting
