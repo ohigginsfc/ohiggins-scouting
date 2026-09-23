@@ -230,8 +230,16 @@ class BrowserTransport:
         if self.requests >= self.max_requests or self.clock() >= self.deadline:
             raise BudgetReached('Request/time budget reached')
 
-    def fetch(self, url, **_ignored):
-        if not url.startswith(scraper.BASE_URL + '/'):
+    def _request(self, url):
+        return self.driver.execute_async_script('''
+            const done=arguments[arguments.length-1];
+            fetch(arguments[0], {signal:AbortSignal.timeout(25000)})
+              .then(async r=>done({status:r.status,body:await r.text(),retry:r.headers.get('retry-after')}))
+              .catch(()=>done({status:0,body:''}));
+        ''', url)
+
+    def fetch(self, url, *, _homepage=False, **_ignored):
+        if not (url == scraper.SOFASCORE_HOME if _homepage else url.startswith(scraper.BASE_URL + '/')):
             raise InvalidPackage('Unexpected provider origin')
         for attempt, backoff in enumerate((0, 30, 120)):
             if backoff:
@@ -245,12 +253,7 @@ class BrowserTransport:
             self.last = self.clock()
             self.requests += 1
             try:
-                result = self.driver.execute_async_script('''
-                    const done=arguments[arguments.length-1];
-                    fetch(arguments[0], {signal:AbortSignal.timeout(25000)})
-                      .then(async r=>done({status:r.status,body:await r.text(),retry:r.headers.get('retry-after')}))
-                      .catch(()=>done({status:0,body:''}));
-                ''', url)
+                result = self._request(url)
                 status = result['status']
             except Exception:
                 status, result = 0, {}
@@ -269,6 +272,8 @@ class BrowserTransport:
             if status == 404 and scraper.is_expected_missing_player_stats(url, status):
                 return None
             if status == 200:
+                if _homepage:
+                    return None
                 try:
                     payload = json.loads(result['body'])
                 except (ValueError, KeyError) as exc:
@@ -282,6 +287,29 @@ class BrowserTransport:
                 raise InvalidPackage(f'Provider HTTP {status}')
             if attempt == 2:
                 raise RuntimeError(f'Provider temporarily unavailable: {status}')
+
+
+class HttpTransport(BrowserTransport):
+    """Original curl_cffi profile, with the recovery collector's shared limits."""
+    def __init__(self, *, session=None, **kwargs):
+        super().__init__(None, **kwargs)
+        if session is None:
+            if scraper.curl_requests is None:
+                raise RuntimeError('curl_cffi is required for HTTP recovery')
+            session = scraper.curl_requests.Session(impersonate='chrome131')
+        self.session = session
+
+    def _request(self, url):
+        response = self.session.get(url, headers=scraper._http_headers(),
+                                    timeout=25, allow_redirects=False)
+        return {'status':response.status_code, 'body':response.text,
+                'retry':response.headers.get('Retry-After')}
+
+    def warmup(self):
+        self.fetch(scraper.SOFASCORE_HOME, _homepage=True)
+
+    def close(self):
+        self.session.close()
 
 
 def collect(state, fetch, persist, *, max_events=25, probe=False):

@@ -1,7 +1,10 @@
 # Recuperación remota de Sofascore
 
 El workflow **Sofascore encrypted recovery** descarga Primera División de Chile
-2024 y 2025 en un contenedor Chromium/Selenium de GitHub Actions. No utiliza
+2024 y 2025 en un contenedor Docker de GitHub Actions. Por defecto utiliza
+`transport=http`, con la sesión `curl_cffi` y el perfil Chrome 131 del scraper
+original. `transport=browser` permite seleccionar Selenium explícitamente.
+No cambia de transporte ni de host automáticamente ante un bloqueo. No utiliza
 PostgreSQL, VPN ni credenciales del club. Docker empaqueta el runtime; la IP de
 salida es la del runner. Sofascore puede rechazarla: una muestra correcta no
 garantiza una temporada completa ni un servicio estable.
@@ -18,8 +21,8 @@ paquetes cifrados AES-256-GCM, nunca respuestas JSON, cookies ni CSV en claro.
 
 ## Operación en Actions
 
-1. `mode=probe`, `season=2024`, `checkpoint=new`: comprobar Selenium, página,
-   una página del calendario y un partido finalizado con estadísticas. El
+1. `mode=probe`, `season=2024`, `checkpoint=new`, `transport=http`: comprobar
+   acceso HTTP, calendario y un partido finalizado con estadísticas. El
    resumen debe indicar `probe_ok: true`. El probe **no** es un paquete de temporada.
 2. `mode=collect`, `season=2024`, `checkpoint=new`: iniciar recuperación.
 3. Repetir `mode=collect`, `season=2024`, `checkpoint=latest` hasta `validated`.
@@ -30,7 +33,7 @@ paquetes cifrados AES-256-GCM, nunca respuestas JSON, cookies ni CSV en claro.
 
 Cada lote limita la descarga a 25 partidos, 300 peticiones y 45 minutos de
 transporte, con al menos cinco segundos entre peticiones. Los presupuestos
-incluyen paginación, incidentes, estadísticas individuales y reintentos. El
+incluyen la apertura HTTP inicial, paginación, incidentes, estadísticas individuales y reintentos. El
 workflow completo tiene un límite de 60 minutos, incluyendo construcción y
 subida. No descargar biografías adicionales: conservar los datos embebidos y
 los campos no disponibles como ausentes.

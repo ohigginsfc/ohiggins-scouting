@@ -106,6 +106,64 @@ def test_request_budget_and_spacing():
     assert sum(sleeps)>=5 and driver.execute_async_script.call_count==2
 
 
+@pytest.mark.parametrize('status',[401,403,429])
+def test_http_denial_has_no_browser_or_host_fallback(status):
+    session=MagicMock()
+    session.get.return_value=MagicMock(status_code=status,text='denied',headers={'Retry-After':'3600'})
+    transport=r.HttpTransport(session=session)
+    with patch.object(r.scraper,'build_driver') as browser:
+        with pytest.raises(r.ProviderBlocked) as blocked:
+            transport.warmup()
+    assert blocked.value.status==status
+    assert session.get.call_count==1
+    browser.assert_not_called()
+    if status==429: assert blocked.value.retry_at
+
+
+def test_http_warmup_counts_toward_budget_and_spacing():
+    clock=[0.0]
+    def sleep(seconds): clock[0]+=seconds
+    session=MagicMock()
+    session.get.side_effect=[MagicMock(status_code=200,text='<html>Home</html>',headers={}),
+                            MagicMock(status_code=200,text='{"events":[]}',headers={})]
+    transport=r.HttpTransport(session=session,max_requests=2,clock=lambda:clock[0],sleep=sleep)
+    transport.warmup()
+    assert transport.fetch(r.scraper.BASE_URL+'/calendar')=={'events':[]}
+    with pytest.raises(r.BudgetReached): transport.fetch(r.scraper.BASE_URL+'/calendar')
+    assert clock[0]>=5 and session.get.call_count==2
+    assert session.get.call_args.kwargs['allow_redirects'] is False
+    transport.close()
+    session.close.assert_called_once()
+
+
+def test_http_rejects_html_and_unexpected_origin():
+    session=MagicMock()
+    session.get.return_value=MagicMock(status_code=200,text='<html>Denied</html>',headers={})
+    transport=r.HttpTransport(session=session)
+    with pytest.raises(r.InvalidPackage): transport.fetch('https://example.com/data')
+    session.get.assert_not_called()
+    with pytest.raises(r.InvalidPackage,match='non-JSON'):
+        transport.fetch(r.scraper.BASE_URL+'/calendar')
+
+
+def test_http_cli_preserves_warmup_retry_after_without_starting_selenium(monkeypatch,tmp_path):
+    from argparse import Namespace
+    monkeypatch.syspath_prepend(str(r.ROOT/'scripts'))
+    import sofascore_recovery as cli
+    args=Namespace(mode='probe',season='2024',checkpoint='new',output=tmp_path,
+                   refresh=False,transport='http')
+    with patch.object(r,'read_key',return_value=b'x'*32), \
+         patch.object(r.HttpTransport,'warmup',side_effect=r.ProviderBlocked(429,'2030-01-01T00:00:00+00:00')), \
+         patch.object(r.HttpTransport,'close') as close, \
+         patch.object(r.scraper,'build_driver') as browser, \
+         patch.object(r.scraper,'curl_requests') as curl:
+        assert cli.run_collection(args)==2
+    browser.assert_not_called()
+    close.assert_called_once()
+    state=r.unpack(r.decrypt_document(tmp_path/'recovery.sofa',b'x'*32),'2024')
+    assert state['status']=='blocked' and state['retry_at']=='2030-01-01T00:00:00+00:00'
+
+
 def test_transient_failure_retries_only_twice():
     driver=MagicMock();driver.execute_async_script.return_value={'status':503,'body':''}
     with patch.object(r.time,'sleep') as sleep:
