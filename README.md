@@ -54,9 +54,8 @@ las pruebas no demuestran que la IP sea la única causa.
 - [Prueba HTTP desde GitHub Actions](https://github.com/ohigginsfc/ohiggins-scouting/actions/runs/35831454593): rechazada por el proveedor, sin escrituras en la BD.
 - [Verificación de Supabase desde Actions](https://github.com/ohigginsfc/ohiggins-scouting/actions/runs/35829941551): conexión y lectura correctas.
 
-**La sincronización semanal todavía no está activa.** Queda integrar y validar
-el recorrido incremental de 2026 hasta su publicación atómica en Supabase y
-programarlo en un entorno con acceso comprobado a Sofascore. Un runner propio
+**La sincronización semanal todavía no está activa.** La actualización manual de 2026 se realiza con el procedimiento documentado
+más abajo. Queda programarla en un entorno con acceso comprobado a Sofascore. Un runner propio
 es una alternativa pendiente de configurar y probar. Los históricos 2024/2025
 se conservan; no necesitan una descarga completa cada semana.
 
@@ -286,33 +285,75 @@ en una BD local de prueba. Su opción `local --apply` **no publica en Supabase**
 Un paquete 2024 con el partido pendiente tampoco satisface la validación de
 temporada completa de ese recolector.
 
-### Actualización manual de 2026: paso pendiente de integrar
+### Sincronización manual de Chile 2026 hacia Supabase
 
-La descarga y publicación inicial de 2026 están realizadas, pero todavía no hay
-un comando versionado y validado que repita de punta a punta la actualización
-incremental hacia Supabase. Los scripts privados de recuperación inicial no se
-distribuyen con un `git clone`. Antes de entregar este paso como operativo:
+Usar `docker-compose.sync.yml` desde el checkout local actualizado. El `.env`
+privado debe contener `SCOUTING_DATABASE_URL` del rol dedicado con
+`sslmode=require`. Este procedimiento no necesita `SOFASCORE_ARTIFACT_KEY`:
+los checkpoints y respaldos quedan **en claro en el disco local**, excluidos de
+Git. Conservar `data/recovery/manual-2026` de forma privada entre ejecuciones.
 
-1. Configurar la temporada Sofascore `88493` del torneo `11653` y un ámbito
-   explícito Chile/Primera/2026. El pipeline incremental actual configura Chile
-   2025; pasar `--season 2026` no cambia por sí solo el ID remoto del torneo.
-2. Incorporar el checkpoint completo del corte ya publicado. Descargar los
-   partidos nuevos y volver a revisar una ventana reciente para correcciones;
-   mantener los históricos y los partidos ya recogidos.
-3. Validar IDs, temporada, cobertura y estadísticas; guardar un candidato
-   completo y trazable. No sustituir una temporada por un CSV que solo contenga
-   los partidos nuevos, ni asumir que el checksum del calendario detecta todos
-   los cambios de estadísticas.
-4. Respaldar el ámbito de destino y publicar métricas y estados de ingestión en
-   una transacción con la credencial de `scouting`, conservando la publicación
-   anterior si falla la validación o la importación.
-5. Verificar la nueva cobertura, el lote de importación y las comparaciones del
-   dashboard antes de dar la actualización por terminada.
+```bash
+docker compose -f docker-compose.sync.yml build collector publisher
+docker compose -f docker-compose.sync.yml run --rm collector collect
+docker compose -f docker-compose.sync.yml run --rm collector validate
+docker compose -f docker-compose.sync.yml run --rm publisher publish
+```
 
-Estos pasos describen el trabajo pendiente, no comandos ya habilitados. Hasta
-validarlo, mantener `DISABLE_SOFASCORE_UPDATE=1` en producción y conservar el
-corte existente. La programación semanal se decidirá después de disponer de una
-actualización manual reproducible.
+`collect` consulta el calendario completo de Chile 2026 (torneo `11653`, temporada
+`88493`), conserva partidos antiguos del checkpoint y descarga los nuevos,
+los que cambiaron de checksum y los últimos 14 días para revisar correcciones de
+estadísticas. Separa peticiones por al menos cinco segundos y limita cada
+invocación a 1.200 peticiones. El recolector no recibe credenciales de la BD.
+
+La primera ejecución sin checkpoint descarga la temporada completa. Para evitar
+repetir la descarga inicial, solicitar por un canal privado la carpeta raw 2026
+con `events.json`, `matches/` y `sha256.json`, colocarla en
+`data/recovery/bootstrap-2026` y ejecutar **una sola vez, antes de collect**:
+
+```bash
+docker compose -f docker-compose.sync.yml run --rm collector bootstrap --source /app/data/recovery/bootstrap-2026
+```
+
+Bootstrap verifica hashes y estadísticas; no habilita la publicación hasta
+consultar un calendario nuevo con `collect`. Una vez completada una descarga,
+repetir `collect` inicia el siguiente corte incremental. Para ampliar la revisión
+de estadísticas antiguas se puede usar `collect --lookback-days 60` (hasta 365).
+
+Si se interrumpe una descarga, se alcanza el presupuesto o falla el proveedor,
+el avance permanece en `candidate.json`. Resolver el motivo antes de reanudar:
+
+```bash
+docker compose -f docker-compose.sync.yml run --rm collector collect --resume
+```
+
+No ejecutar dos recolectores sobre la misma carpeta. Una reanudación conserva el
+corte y calendario iniciales. Ante 401/403/429 detenerse: no hay rotación de IP ni
+reintento automático; respetar el plazo indicado por el proveedor. Un 404 o una
+alineación incompleta tampoco se convierte en ceros ni permite publicar un
+candidato parcial.
+
+`validate` exige todos los partidos del calendario con estadísticas válidas.
+`publish` **sin `--apply` solo comprueba** el candidato y la BD, incluyendo que
+no desaparezcan partidos ya publicados ni se reemplace una publicación más
+reciente. Si la comprobación termina correctamente, aplicar explícitamente:
+
+```bash
+docker compose -f docker-compose.sync.yml run --rm publisher publish --apply
+```
+
+Antes de escribir se guarda un respaldo lógico de las tablas del esquema en
+`data/recovery/manual-2026/backups/*.json.gz` (datos y columnas, no DDL ni roles;
+no sustituye una política de backup PostgreSQL). Después se reemplaza únicamente
+el ámbito Sofascore/Chile/Primera/2026: métricas y estados de partidos se confirman
+juntos en una transacción. Los históricos 2024/2025 y COMET no se modifican.
+Si falla la transacción, se conserva la publicación anterior. El resultado queda
+en `publication.json`, con ID del lote, partidos, métricas y ruta del respaldo.
+
+Comprobar el resultado en el dashboard y refrescar la página si conserva una
+vista anterior. Mantener la descarga de la interfaz desactivada: este comando
+manual es independiente del pipeline antiguo de la UI. La programación semanal
+queda pendiente; no hay cron ni ejecución automática al desplegar la web.
 
 ### Otras opciones de despliegue
 
