@@ -1,0 +1,38 @@
+name: Original Lucas HTTP probe
+on:
+  push:
+    branches: [diagnostic/lucas-http-actions]
+    paths: ['scripts/probe_lucas_http.py', '.github/workflows/lucas-http-probe.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: lucas-http-probe
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Extract original source
+        run: |
+          mkdir -p /tmp/lucas-original
+          git archive cbe7121d9933e62b088ec608bd45700e1dcddcd7 | tar -x -C /tmp/lucas-original
+      - name: Build original worker
+        run: docker build -f /tmp/lucas-original/docker/Dockerfile.scraper -t lucas-http-probe /tmp/lucas-original
+      - name: Probe original HTTP flow without database credentials
+        run: |
+          mkdir -p data/recovery/lucas-http-report
+          docker run --rm --entrypoint python \
+            -v "$PWD/scripts/probe_lucas_http.py:/probe.py:ro" \
+            -v "$PWD/data/recovery/lucas-http-report:/report" \
+            lucas-http-probe /probe.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lucas-http-report
+          path: data/recovery/lucas-http-report/report.json
+          retention-days: 7
