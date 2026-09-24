@@ -95,6 +95,11 @@ modo claro/oscuro del sistema operativo ni del navegador.
 
 ## Datos demo y datos reales
 
+Si el servidor anterior conserva informes subjetivos en su PostgreSQL Docker,
+seguir la [migración de informes a Supabase](docs/migrate-legacy-reports.md)
+antes de retirar esa instancia. Las métricas Sofascore y los informes de scouts
+son datos distintos y se migran por separado.
+
 El [worker de recuperación cifrada](docs/sofascore-recovery.md) permite intentar
 la recuperación de Chile 2024/2025 y genera checkpoints reanudables y paquetes
 completos importables localmente. Su extracción depende del acceso a Sofascore:
