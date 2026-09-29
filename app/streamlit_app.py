@@ -40,6 +40,7 @@ from scouting.services.reports_service import (
     hide_report,
     restore_report,
     update_report_recommendation,
+    update_report,
 )
 
 _APP_DIR = Path(__file__).resolve().parent
@@ -613,6 +614,9 @@ def _render_db_banner(*, page: str | None = None) -> None:
 
 
 def _current_auth_username() -> str | None:
+    if os.environ.get('PORTAL_MODE') == '1':
+        from scouting.portal.security import require_user
+        return require_user()['username']
     return (os.environ.get("SCOUTING_USERNAME") or "").strip() or None
 
 
@@ -649,6 +653,12 @@ def _render_visible_reports_management(reports: list[dict[str, Any]]) -> None:
         )
         return
 
+    if os.environ.get('PORTAL_MODE') == '1':
+        from scouting.portal.security import can_edit
+        reports = [r for r in reports if can_edit(r)]
+        if not reports:
+            st.info('No tienes informes propios para editar.')
+            return
     raw_labels = [report_option_label(r) for r in reports]
     unique_labels = ensure_unique_labels(raw_labels)
     labels: dict[str, int] = {}
@@ -684,11 +694,20 @@ def _render_visible_reports_management(reports: list[dict[str, Any]]) -> None:
         key=f"dashboard_rec_editor_{report_id}",
     )
 
+    edited_text = {}
+    if os.environ.get('PORTAL_MODE') == '1':
+        with st.expander('Editar evaluación'):
+            for field, label in [('summary', 'Resumen'), ('strengths', 'Fortalezas'), ('weaknesses', 'Aspectos a mejorar')]:
+                edited_text[field] = st.text_area(label, value=report.get(field) or '', key=f'portal_edit_{report_id}_{field}')
+    portal_scout = False
+    if os.environ.get('PORTAL_MODE') == '1':
+        from scouting.portal.security import require_user
+        portal_scout = require_user()['role'] == 'scout'
     b1, b2 = st.columns(2)
     save_clicked = b1.button(labeled("save", "Guardar cambios"), type="primary", key="dashboard_save_report")
-    hide_clicked = b2.button(labeled("hide", "Ocultar informe"), type="secondary", key="dashboard_hide_report")
+    hide_clicked = False if portal_scout else b2.button(labeled("hide", "Ocultar informe"), type="secondary", key="dashboard_hide_report")
 
-    confirm_hide = st.checkbox(
+    confirm_hide = False if portal_scout else st.checkbox(
         "Confirmo que quiero ocultar este informe",
         key="dashboard_confirm_hide",
     )
@@ -697,7 +716,10 @@ def _render_visible_reports_management(reports: list[dict[str, Any]]) -> None:
     if save_clicked:
         try:
             with get_connection() as conn:
-                update_report_recommendation(conn, report_id, new_recommendation)
+                if os.environ.get('PORTAL_MODE') == '1':
+                    update_report(conn, report_id, recommendation=new_recommendation, **edited_text)
+                else:
+                    update_report_recommendation(conn, report_id, new_recommendation)
             st.session_state["dashboard_flash_success"] = (
                 f"Recomendación actualizada · {player_name}."
             )
@@ -719,6 +741,9 @@ def _render_visible_reports_management(reports: list[dict[str, Any]]) -> None:
                 st.rerun()
             except Exception as exc:  # noqa: BLE001
                 st.error(f"No se pudo ocultar: {exc}")
+
+    if portal_scout:
+        return
 
     with st.expander("Eliminar permanentemente (irreversible)", expanded=False):
         st.markdown(
@@ -938,7 +963,8 @@ def _render_dashboard() -> None:
 
     from ui.data_sync_card import render_data_sync_card
 
-    render_data_sync_card(key_prefix="dashboard")
+    if os.environ.get('PORTAL_MODE') != '1':
+        render_data_sync_card(key_prefix='dashboard')
 
     section_header(
         "Gestión de informes",
@@ -1055,7 +1081,12 @@ def _render_new_report() -> None:
             icon="activity",
         )
         rc1, rc2, rc3 = st.columns(3)
-        scout_name = rc1.text_input("Scout *", placeholder="Nombre del ojeador", key="mr_scout_name")
+        if os.environ.get('PORTAL_MODE') == '1':
+            from scouting.portal.security import require_user
+            scout_name = require_user()['display_name']
+            rc1.text_input('Scout', value=scout_name, disabled=True)
+        else:
+            scout_name = rc1.text_input("Scout *", placeholder="Nombre del ojeador", key="mr_scout_name")
         report_date = rc2.date_input("Fecha del informe", key="mr_report_date")
         competition = rc3.text_input("Competición", placeholder="Opcional", key="mr_competition")
 
@@ -4711,4 +4742,5 @@ def main() -> None:
         _render_administration()
 
 
-main()
+if __name__ == '__main__':
+    main()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from scouting.portal.security import require_report_owner
 from decimal import Decimal
 from typing import Any
 
@@ -20,6 +22,8 @@ def replace_attribute_ratings_for_report(
     default_max_rating: float = RATING_MAX,
 ) -> int:
     """Borra valoraciones previas del informe e inserta las nuevas (carga idempotente)."""
+    if os.environ.get('PORTAL_MODE') == '1':
+        require_report_owner(conn, report_id)
     attribute_ratings_repository.delete_attribute_ratings_by_report(conn, report_id)
     return save_attribute_ratings_for_report(
         conn, report_id, ratings, default_max_rating=default_max_rating
@@ -39,6 +43,8 @@ def save_attribute_ratings_for_report(
     attribute_group, attribute_name, rating, max_rating (opcional), notes (opcional).
     Devuelve el número de filas insertadas.
     """
+    if os.environ.get('PORTAL_MODE') == '1':
+        require_report_owner(conn, report_id)
     inserted = 0
     for row in ratings:
         group = row.get("attribute_group")
