@@ -154,6 +154,17 @@ def _primary_external_id(conn: Connection, player_id: int) -> str | None:
     return ids[0] if ids else None
 
 
+def _sofascore_external_ids_many(conn: Connection, player_ids: list[int]) -> dict[int, set[str]]:
+    result: dict[int, set[str]] = {}
+    for row in player_external_ids_repository.get_external_ids_by_players(conn, player_ids):
+        if str(row.get('provider', '')).strip().lower() != SOFASCORE_PROVIDER.lower():
+            continue
+        external_id = str(row.get('external_id') or '').strip()
+        if external_id:
+            result.setdefault(int(row['player_id']), set()).add(external_id)
+    return result
+
+
 def list_ohiggins_season_comparison_candidates(
     conn: Connection,
     *,
@@ -215,9 +226,11 @@ def list_ohiggins_season_comparison_candidates(
 
     ext_to_hist_oh: dict[str, int] = {}
     ext_to_hist_any: dict[str, int] = {}
+    external_ids = _sofascore_external_ids_many(
+        conn, [int(row['player_id']) for row in hist_all + active_rows])
     for hr in hist_all:
         hp = int(hr["player_id"])
-        for ext in _sofascore_external_ids(conn, hp):
+        for ext in external_ids.get(hp, set()):
             ext_to_hist_any.setdefault(ext, hp)
             if is_ohiggins_team_name(hr.get("objective_team")):
                 ext_to_hist_oh.setdefault(ext, hp)
@@ -233,7 +246,7 @@ def list_ohiggins_season_comparison_candidates(
             or "—"
         )
         team_a = str(ar.get("objective_team") or "—")
-        ext_ids = _sofascore_external_ids(conn, pid_a)
+        ext_ids = external_ids.get(pid_a, set())
         primary_ext = next(iter(sorted(ext_ids)), None)
 
         hist_row: dict[str, Any] | None = None

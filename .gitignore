@@ -99,3 +99,7 @@ docker-compose.audit-clean.yml
 
 .local_checks/
 data/recovery/
+
+
+!.env.portal.example
+.env.portal

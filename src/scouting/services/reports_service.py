@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from datetime import date, datetime
+from scouting.portal.security import require_admin, require_user, require_report_owner
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -16,6 +18,8 @@ def count_reports(conn: Connection, *, include_hidden: bool = False) -> int:
 
 
 def count_hidden_reports(conn: Connection) -> int:
+    if os.environ.get('PORTAL_MODE') == '1' and require_user()['role'] != 'admin':
+        return 0
     return reports_repository.count_hidden_reports(conn)
 
 
@@ -28,6 +32,8 @@ def fetch_visible_reports(conn: Connection, limit: int = 50) -> list[dict[str, A
 
 
 def fetch_hidden_reports(conn: Connection, limit: int = 100) -> list[dict[str, Any]]:
+    if os.environ.get('PORTAL_MODE') == '1':
+        require_admin()
     return reports_repository.get_hidden_reports(conn, limit=limit)
 
 
@@ -46,6 +52,8 @@ VALID_RECOMMENDATIONS = frozenset(
 
 
 def update_report_recommendation(conn: Connection, report_id: int, recommendation: str) -> None:
+    if os.environ.get('PORTAL_MODE') == '1':
+        require_report_owner(conn, report_id)
     value = str(recommendation or "").strip()
     if value not in VALID_RECOMMENDATIONS:
         raise ValueError(f"Recomendación no válida: {recommendation!r}")
@@ -53,24 +61,51 @@ def update_report_recommendation(conn: Connection, report_id: int, recommendatio
 
 
 def hide_report(conn: Connection, report_id: int, hidden_by: str | None = None) -> None:
+    if os.environ.get('PORTAL_MODE') == '1':
+        require_admin()
     reports_repository.hide_report(conn, report_id, hidden_by=hidden_by)
 
 
 def restore_report(conn: Connection, report_id: int) -> None:
+    if os.environ.get('PORTAL_MODE') == '1':
+        require_admin()
     reports_repository.restore_report(conn, report_id)
 
 
 def delete_report_permanently(conn: Connection, report_id: int) -> bool:
-    """Eliminación permanente. Sin sistema de roles: cualquier sesión autenticada puede usarla."""
+    """Delete a report; unified portal reserves this operation for admins."""
+    if os.environ.get('PORTAL_MODE') == '1':
+        require_admin()
     return reports_repository.delete_report_permanently(conn, report_id)
 
 
+def assign_report_owner(conn: Connection, report_id: int, user_id: str) -> None:
+    """Explicit admin assignment for migrated reports, preserving all sporting data."""
+    from scouting.portal.accounts import get_user
+    actor = require_admin()
+    owner = get_user(user_id)
+    if not owner or not owner['active']:
+        raise ValueError('Selecciona una cuenta activa.')
+    result = conn.execute("""UPDATE scouting_reports
+        SET raw_payload = COALESCE(raw_payload, '{}'::jsonb) ||
+            jsonb_build_object('portal_owner_id', %s::text,
+                               'portal_owner_assigned_by', %s::text,
+                               'portal_owner_assigned_at', now())
+        WHERE id=%s""", (owner['id'], actor['id'], report_id))
+    if result.rowcount != 1:
+        raise ValueError('Informe no encontrado.')
+
+
 def update_report(conn: Connection, report_id: int, **fields: Any) -> None:
+    if os.environ.get('PORTAL_MODE') == '1':
+        require_report_owner(conn, report_id)
     if "recommendation" in fields and fields["recommendation"] is not None:
         value = str(fields["recommendation"]).strip()
         if value not in VALID_RECOMMENDATIONS:
             raise ValueError(f"Recomendación no válida: {fields['recommendation']!r}")
         fields["recommendation"] = value
+    if os.environ.get('PORTAL_MODE') == '1' and 'raw_payload' in fields:
+        raise ValueError('No se puede cambiar la propiedad del informe.')
     reports_repository.update_report(conn, report_id, **fields)
 
 
@@ -131,6 +166,11 @@ def create_scouting_report_from_dict(conn: Connection, data: dict[str, Any]) -> 
 
     Expected keys include at least: player_name, source_type, and report fields used by repositories.
     """
+    if os.environ.get('PORTAL_MODE') == '1':
+        user = require_user()
+        data = dict(data)
+        data['scout_name'] = user['display_name']
+        data['raw_payload'] = {**(data.get('raw_payload') or {}), 'portal_owner_id': user['id']}
     player_name = data.get("player_name")
     if not player_name or not str(player_name).strip():
         raise ValueError("player_name is required")
@@ -206,6 +246,8 @@ def upsert_scouting_report_from_dict(
 
     Returns (report_id, player_created, player_id, action, duplicate_reports_removed).
     """
+    if os.environ.get('PORTAL_MODE') == '1':
+        require_admin()
     player_name = data.get("player_name")
     if not player_name or not str(player_name).strip():
         raise ValueError("player_name is required")

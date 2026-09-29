@@ -14,6 +14,11 @@ from scouting.config.database import get_db_connection_params
 
 def get_connection() -> Connection:
     """Open a new PostgreSQL connection. Caller is responsible for closing (or use context manager)."""
+    if os.environ.get('PORTAL_MODE') == '1':
+        from scouting.portal.security import require_user
+        require_user()
+        if not os.environ.get('SCOUTING_DATABASE_URL') or os.environ.get('DB_SCHEMA') != 'scouting':
+            raise RuntimeError('Configura la conexión exclusiva al esquema scouting.')
     params = get_db_connection_params()
     conn = psycopg.connect(**params)
     schema = os.environ.get("DB_SCHEMA", "").strip()
@@ -23,6 +28,14 @@ def get_connection() -> Connection:
             conn.commit()
             if actual != schema:
                 raise ValueError("Configured DB_SCHEMA is absent or inaccessible")
+            if os.environ.get('PORTAL_MODE') == '1':
+                exposed = conn.execute("""SELECT EXISTS (
+                    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                    WHERE n.nspname='public' AND c.relkind IN ('r','v','m','p')
+                    AND has_table_privilege(current_user,c.oid,'SELECT'))""").fetchone()[0]
+                conn.commit()
+                if exposed:
+                    raise PermissionError('La conexión de scouting tiene acceso a public; utiliza un rol aislado.')
         except Exception:
             conn.close()
             raise

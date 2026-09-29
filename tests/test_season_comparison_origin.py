@@ -22,6 +22,20 @@ from scouting.services.objective_origin_policy import (  # noqa: E402
 from scouting.services import season_comparison_service  # noqa: E402
 
 
+def test_batch_external_ids_keep_provider_and_player_identity():
+    rows = [
+        {'player_id': 1, 'provider': ' Sofascore ', 'external_id': ' ext-1 '},
+        {'player_id': 1, 'provider': 'sofascore', 'external_id': 'ext-1'},
+        {'player_id': 2, 'provider': 'other', 'external_id': 'ext-1'},
+        {'player_id': 3, 'provider': 'sofascore', 'external_id': None},
+    ]
+    with patch.object(season_comparison_service.player_external_ids_repository,
+                      'get_external_ids_by_players', return_value=rows) as batch:
+        conn = MagicMock()
+        assert season_comparison_service._sofascore_external_ids_many(conn, [1, 2, 3]) == {1: {'ext-1'}}
+        batch.assert_called_once_with(conn, [1, 2, 3])
+
+
 class OriginPolicyTests(unittest.TestCase):
     def test_prefer_sofascore_when_both_exist(self) -> None:
         conn = MagicMock()
@@ -82,7 +96,7 @@ class SeasonLinkTests(unittest.TestCase):
         }
 
     @patch("scouting.services.season_comparison_service.players_repository.get_player_by_id")
-    @patch("scouting.services.season_comparison_service._sofascore_external_ids")
+    @patch("scouting.services.season_comparison_service._sofascore_external_ids_many")
     @patch("scouting.services.season_comparison_service._summary_rows")
     @patch("scouting.services.season_comparison_service.assess_season_comparison_gate")
     def test_external_id_links_players(
@@ -100,7 +114,7 @@ class SeasonLinkTests(unittest.TestCase):
             [self._row(1, "Juan Perez", "O'Higgins", "2025")],
             [self._row(99, "Juan Perez", "O'Higgins", "2024")],
         ]
-        mock_ext.side_effect = lambda _c, pid: {"ext-1"} if pid in (1, 99) else set()
+        mock_ext.return_value = {1: {"ext-1"}, 99: {"ext-1"}}
         mock_player.return_value = {"full_name": "Juan Perez", "position": "MF"}
 
         gate, cands = season_comparison_service.list_ohiggins_season_comparison_candidates(
@@ -113,7 +127,7 @@ class SeasonLinkTests(unittest.TestCase):
         self.assertEqual(cands[0].player_id_historical, 99)
 
     @patch("scouting.services.season_comparison_service.players_repository.get_player_by_id")
-    @patch("scouting.services.season_comparison_service._sofascore_external_ids")
+    @patch("scouting.services.season_comparison_service._sofascore_external_ids_many")
     @patch("scouting.services.season_comparison_service._summary_rows")
     @patch("scouting.services.season_comparison_service.assess_season_comparison_gate")
     def test_same_name_different_external_id_not_mixed(
@@ -131,7 +145,7 @@ class SeasonLinkTests(unittest.TestCase):
             [self._row(1, "Juan Perez", "O'Higgins", "2025")],
             [self._row(99, "Juan Perez", "O'Higgins", "2024")],
         ]
-        mock_ext.side_effect = lambda _c, pid: {"ext-a"} if pid == 1 else {"ext-b"}
+        mock_ext.return_value = {1: {"ext-a"}, 99: {"ext-b"}}
         mock_player.return_value = {"full_name": "Juan Perez", "position": "MF"}
 
         _, cands = season_comparison_service.list_ohiggins_season_comparison_candidates(
@@ -141,7 +155,7 @@ class SeasonLinkTests(unittest.TestCase):
         self.assertIsNone(cands[0].row_historical)
 
     @patch("scouting.services.season_comparison_service.players_repository.get_player_by_id")
-    @patch("scouting.services.season_comparison_service._sofascore_external_ids")
+    @patch("scouting.services.season_comparison_service._sofascore_external_ids_many")
     @patch("scouting.services.season_comparison_service._summary_rows")
     @patch("scouting.services.season_comparison_service.assess_season_comparison_gate")
     def test_new_signing_no_historical(
@@ -159,7 +173,7 @@ class SeasonLinkTests(unittest.TestCase):
             [self._row(1, "Nuevo", "O'Higgins", "2025")],
             [],
         ]
-        mock_ext.side_effect = lambda _c, pid: {"ext-new"}
+        mock_ext.return_value = {1: {"ext-new"}}
         mock_player.return_value = {"full_name": "Nuevo", "position": "FW"}
 
         _, cands = season_comparison_service.list_ohiggins_season_comparison_candidates(

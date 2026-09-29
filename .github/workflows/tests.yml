@@ -48,6 +48,8 @@ jobs:
           DISABLE_SOFASCORE_UPDATE=1
           EOF
       - run: python -m pytest -q
+      - name: Build unified portal
+        run: docker build -f docker/Dockerfile.portal -t ohiggins-portal:test .
       - name: Build isolated recovery worker and check Selenium
         env:
           SOFASCORE_ARTIFACT_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=

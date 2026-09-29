@@ -3,6 +3,17 @@
 Plataforma de scouting deportivo: informes subjetivos, estadísticas objetivas,
 comparación entre temporadas y actualización de datos desde la interfaz.
 
+## Portal unificado COMET y Scouting
+
+El nuevo punto de entrada `app/portal.py` reúne ambos módulos con cuentas personales
+en Supabase Auth. Administración accede a COMET y scouting; el rol scout solo a
+scouting y puede editar sus propios informes. Los datos deportivos conservan sus
+esquemas y las sincronizaciones continúan como procesos independientes.
+
+Consultar el [manual de cuentas, permisos y despliegue del portal](docs/unified-portal.md).
+Utiliza `.env.portal` y `docker-compose.portal.yml`, con puerto local 18502 por
+defecto. La aplicación anterior se mantiene disponible para una transición en paralelo.
+
 ## Base de datos y operación
 
 La aplicación puede utilizar PostgreSQL local o PostgreSQL en Supabase. La base
