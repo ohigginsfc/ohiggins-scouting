@@ -65,3 +65,25 @@ def test_second_bootstrap_cannot_create_another_admin(database):
     accounts.bootstrap_admin('admin@example.test', 'Admin', 'synthetic-password-123')
     with pytest.raises(ValueError, match='Ya existen'):
         accounts.bootstrap_admin('other@example.test', 'Other', 'synthetic-password-123')
+
+
+def test_comet_reader_sees_rls_rows_without_write_or_scout_access(database):
+    """A SELECT grant with no RLS policy silently returns an empty dashboard."""
+    tables = ['actuaciones_arqueros', 'actuaciones_jugadores', 'competiciones',
+              'competidores', 'jugadores', 'partidos', 'partidos_fases', 'posiciones', 'equipos']
+    with psycopg.connect(database) as db:
+        for table in tables:
+            db.execute(psycopg.sql.SQL('CREATE TABLE public.{} (probe integer)').format(psycopg.sql.Identifier(table)))
+            db.execute(psycopg.sql.SQL('INSERT INTO public.{} VALUES (1)').format(psycopg.sql.Identifier(table)))
+            db.execute(psycopg.sql.SQL('ALTER TABLE public.{} ENABLE ROW LEVEL SECURITY').format(psycopg.sql.Identifier(table)))
+        # Keep the migration in this disposable transaction and roll it back.
+        source = Path('db/portal/002_comet_reader.sql').read_text(encoding='utf8')
+        db.execute(source.replace('BEGIN;', '').replace('COMMIT;', ''))
+        db.execute('SET LOCAL ROLE comet_reader')
+        assert db.execute('SELECT count(*) FROM public.jugadores').fetchone()[0] == 1
+        assert not db.execute("SELECT has_table_privilege(current_user,'public.jugadores','INSERT')").fetchone()[0]
+        db.execute('RESET ROLE')
+        db.execute('SET LOCAL ROLE authenticated')
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            db.execute('SELECT * FROM public.jugadores')
+        db.rollback()

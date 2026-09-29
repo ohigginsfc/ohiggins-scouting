@@ -968,7 +968,7 @@ def _render_dashboard() -> None:
 
     section_header(
         "Gestión de informes",
-        "Edita, oculta o elimina informes.",
+        None if os.environ.get('PORTAL_MODE') == '1' else "Edita, oculta o elimina informes.",
         icon="edit",
     )
     _render_visible_reports_management(visible_reports)

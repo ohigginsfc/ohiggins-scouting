@@ -22,6 +22,16 @@ def get_external_ids_by_player(conn: Connection, player_id: int) -> list[dict[st
         return list(cur.fetchall())
 
 
+def get_external_ids_by_players(conn: Connection, player_ids: list[int]) -> list[dict[str, Any]]:
+    if not player_ids:
+        return []
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute('SELECT player_id, provider, external_id FROM player_external_ids '
+                    'WHERE player_id = ANY(%s) ORDER BY player_id, provider, external_id',
+                    (sorted(set(player_ids)),))
+        return list(cur.fetchall())
+
+
 def find_player_by_external_id(
     conn: Connection,
     provider: str,

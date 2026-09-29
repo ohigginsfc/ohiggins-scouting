@@ -32,6 +32,9 @@ Los permisos se comprueban antes de cargar COMET, consultar sus datos y devolver
 resultados de caché, y también en los servicios que modifican informes. La conexión
 de scouting se rechaza si puede leer tablas de `public`. COMET utiliza una conexión
 distinta, de solo lectura. No se enriquece scouting con información federada.
+La migración `002_comet_reader.sql` incluye políticas RLS de SELECT para ese
+lector: conceder SELECT sin una política RLS puede devolver cero filas aunque
+las tablas tengan datos. Validar conteos no vacíos al configurar COMET.
 
 Cada sesión se valida contra Supabase Auth y el perfil privado en cada ejecución
 de Streamlit. Cambiar rol/estado/contraseña desde el portal revoca las sesiones del
