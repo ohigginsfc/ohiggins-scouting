@@ -6,6 +6,7 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 COPY src /app/src
 COPY app /app/app
+COPY docker/portal-config.toml /app/.streamlit/config.toml
 COPY scripts/bootstrap_portal_admin.py /app/scripts/bootstrap_portal_admin.py
 COPY data/images /app/data/images
 CMD ["streamlit", "run", "app/portal.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]

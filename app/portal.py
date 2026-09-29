@@ -13,6 +13,7 @@ os.environ['DB_SCHEMA'] = 'scouting'
 import streamlit as st
 from scouting.portal import accounts
 from scouting.portal.security import session_scope, require_admin
+from ui.portal_brand import inject_portal_brand, masthead, welcome, module_card, login_identity
 
 
 def logout():
@@ -21,30 +22,31 @@ def logout():
 
 
 def login():
-    st.title("O’Higgins · Plataforma deportiva")
-    st.caption('Accede con tu cuenta personal del club.')
-    with st.form('portal_login'):
-        username = st.text_input('Correo electrónico', key='portal_username')
-        password = st.text_input('Contraseña', type='password', key='portal_password')
-        submit = st.form_submit_button('Entrar', type='primary')
-    if submit:
-        try:
-            token = accounts.authenticate(username, password)
-        except Exception:
-            st.error('No se pudo iniciar sesión. Revisa la configuración de Supabase Auth con el administrador.')
-            return
-        if token:
-            st.session_state.clear()
-            st.session_state['portal_session'] = token
-            st.query_params.clear()
-            st.rerun()
-        st.error('Credenciales incorrectas o cuenta temporalmente bloqueada.')
+    with st.container(key="portal_login_shell"):
+        login_identity()
+
+        with st.form('portal_login'):
+            username = st.text_input('Correo electrónico', key='portal_username')
+            password = st.text_input('Contraseña', type='password', key='portal_password')
+            submit = st.form_submit_button('Entrar', type='primary', use_container_width=True)
+        if submit:
+            try:
+                token = accounts.authenticate(username, password)
+            except Exception:
+                st.error('No se pudo iniciar sesión. Revisa la configuración de Supabase Auth con el administrador.')
+                return
+            if token:
+                st.session_state.clear()
+                st.session_state['portal_session'] = token
+                st.query_params.clear()
+                st.rerun()
+            st.error('Credenciales incorrectas o cuenta temporalmente bloqueada.')
 
 
 def manage_accounts():
     require_admin()
     st.header('Usuarios y permisos')
-    st.caption('Cada cuenta pertenece a una persona. Los cambios revocan sus sesiones actuales.')
+    st.caption('Cambiar permisos revoca las sesiones abiertas.')
     users = accounts.list_users()
     st.dataframe([{k: u[k] for k in ('username', 'display_name', 'role', 'active')} for u in users], hide_index=True)
     selected = st.selectbox('Cuenta', ['Nueva cuenta'] + [u['username'] for u in users])
@@ -109,11 +111,8 @@ def render_comet():
 
 def render_scouting(user):
     import streamlit_app as scouting
-    from ui.layout import render_top_header, render_page_heading
-    from ui.styles import build_full_width_layout_css
-    from ui.theme import inject_ohiggins_theme
-    inject_ohiggins_theme()
-    st.markdown(build_full_width_layout_css(), unsafe_allow_html=True)
+    inject_portal_brand()
+    from ui.navigation import ensure_current_page, nav_button_key, navigate_to
     pages = {
         'Dashboard': scouting._render_dashboard,
         'Nuevo informe': scouting._render_new_report,
@@ -123,13 +122,17 @@ def render_scouting(user):
     }
     if user['role'] == 'admin':
         pages['Informes ocultos'] = scouting._render_hidden_reports_page
-    st.header('Scouting')
-    page = render_top_header(pages=list(pages), username=user['display_name'])
+    current = ensure_current_page(list(pages))
+    for col, name in zip(st.columns(len(pages)), pages):
+        col.button(name, key=nav_button_key(name), use_container_width=True,
+                   type='primary' if name == current else 'secondary',
+                   on_click=navigate_to, args=(name,))
+    page = ensure_current_page(list(pages))
     if page not in pages:
         raise PermissionError('Sección no autorizada.')
     if scouting._handle_page_navigation(page):
         st.rerun()
-    render_page_heading(page)
+    st.header("Resumen" if page == "Dashboard" else page)
     if page in {'Dashboard', 'Consultar jugador', 'Comparación', 'Datos objetivos'}:
         from scouting.db import get_connection
         from scouting.repositories.sofascore_event_ingestion_repository import list_incomplete_coverage
@@ -145,7 +148,8 @@ def render_scouting(user):
 
 
 def main():
-    st.set_page_config(page_title="O’Higgins · Plataforma deportiva", page_icon='⚽', layout='wide')
+    st.set_page_config(page_title="O’Higgins · Plataforma deportiva", page_icon=str(ROOT / 'app/assets/OHigginsFC.png'), layout='wide')
+    inject_portal_brand()
     token = st.session_state.get('portal_session')
     try:
         user = accounts.resolve_session(token)
@@ -158,21 +162,21 @@ def main():
         login()
         return
     with session_scope(token, verified_user=user):
-        st.title("O’Higgins FC")
-        st.caption(f"{user['display_name']} · {user['role']}")
+        masthead(user)
         modules = ['Inicio', 'COMET', 'Scouting', 'Administración'] if user['role'] == 'admin' else ['Scouting']
         if st.session_state.get('portal_module') not in modules:
             st.session_state['portal_module'] = modules[0]
-        module = st.radio('Módulo', modules, key='portal_module', horizontal=True)
+        nav, exit_col = st.columns([6, 1])
+        with nav:
+            module = st.radio('Módulo', modules, key='portal_module', horizontal=True, label_visibility='collapsed')
+        with exit_col:
+            st.button('Cerrar sesión', key='portal_logout', on_click=logout, use_container_width=True)
         if st.session_state.get('_portal_previous_module') != module:
             for key in list(st.session_state):
-                if key not in {'portal_session', 'portal_module'}:
+                if key not in {'portal_session', 'portal_module', 'portal_logout'}:
                     del st.session_state[key]
             st.query_params.clear()
             st.session_state['_portal_previous_module'] = module
-        if st.button('Cerrar sesión'):
-            logout()
-            st.rerun()
         try:
             if module == 'COMET':
                 render_comet()
@@ -182,15 +186,16 @@ def main():
                 render_scouting(user)
             else:
                 require_admin()
-                st.title('Plataforma deportiva')
-                st.write('Un acceso para los datos federados y el trabajo de scouting del club.')
-                left, right = st.columns(2)
+                welcome(user)
+                left, right = st.columns(2, gap='large')
                 with left:
-                    st.subheader('COMET · Fútbol formativo')
-                    st.write('Planteles, minutos, resultados y desarrollo de divisiones menores.')
+                    module_card('01', 'COMET', 'Fútbol formativo')
+                    st.button('Entrar a COMET →', key='open_comet', use_container_width=True,
+                              type='primary', on_click=lambda: st.session_state.update(portal_module='COMET'))
                 with right:
-                    st.subheader('Scouting')
-                    st.write('Informes, estadísticas y comparación de jugadores.')
+                    module_card('02', 'Scouting', 'Informes y jugadores')
+                    st.button('Entrar a Scouting →', key='open_scouting', use_container_width=True,
+                              type='primary', on_click=lambda: st.session_state.update(portal_module='Scouting'))
         except PermissionError:
             st.error('No tienes permiso para realizar esta operación. Inicia sesión de nuevo si tu cuenta cambió.')
         except Exception:
