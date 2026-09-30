@@ -96,12 +96,21 @@ def manage_accounts():
 def render_comet():
     require_admin()  # Before import, menus, cache lookup or connection creation.
     import comet_dashboard as comet
+    import comet_followup as followup
+    import comet_insights as insights
     pages = {
         'Resumen ejecutivo': comet.page_executive_summary,
         'Desarrollo juvenil': comet.page_youth_development,
         'Rendimiento competitivo': comet.page_competition_performance,
         'Análisis de jugadores': comet.page_player_analysis,
         'Estructura del plantel': comet.page_squad_structure,
+        'Partido semanal': followup.page_weekly_match,
+        'Rankings por categoría': followup.page_rankings,
+        'Ficha del jugador': followup.page_player,
+        'Indicadores': insights.page_indicators,
+        'Alertas': insights.page_alerts,
+        'Jugadores adelantados': insights.page_adelantados,
+        'Seguimiento y configuración': insights.page_tracking,
     }
     st.header('COMET · Fútbol formativo')
     st.caption('Datos federados · Acceso exclusivo de administración')
