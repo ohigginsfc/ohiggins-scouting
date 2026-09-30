@@ -6,6 +6,7 @@ import pytest
 
 from scouting.comet import mailer
 from scouting.comet.digest import Digest
+from scouting.comet.ledger import MemoryLedger
 from scripts import comet_demo_data, send_comet_weekly_digest as job
 from tests import comet_tiny
 
@@ -64,11 +65,13 @@ def test_each_recipient_gets_an_individual_multipart_message():
         mailer.send_digest(DIGEST, ['sin arroba', ' '], config, smtp_factory=FakeSMTP)
 
 
-def run_job(argv, stored, env=None, printed=None):
+def run_job(argv, stored, env=None, printed=None, ledger=None, periods=None):
     raw = comet_tiny.build()
     lines = printed if printed is not None else []
-    code = job.run(argv, env=env or {}, load_raw=lambda: raw, stored=(stored, None),
-                   now=comet_tiny.TODAY, smtp_factory=FakeSMTP, out=lines.append)
+    code = job.run(argv, env=env or {}, load_raw=lambda: raw,
+                   stored=(stored, job.NO_PERIODS if periods is None else periods, None),
+                   now=comet_tiny.TODAY, smtp_factory=FakeSMTP, ledger=ledger if ledger is not None else MemoryLedger(),
+                   out=lines.append)
     return code, '\n'.join(lines)
 
 
@@ -93,13 +96,14 @@ def test_send_is_refused_unless_recipients_are_confirmed_and_smtp_is_configured(
 def test_send_succeeds_only_with_confirmed_recipients_and_smtp():
     stored = {'digest_recipients': {'value': ['a@example.test', 'b@example.test'], 'confirmed': True}}
     code, output = run_job(['--week-of', '2026-03-16', '--send'], stored, SMTP_ENV)
-    assert code == 0 and 'enviado a 2 destinatarios' in output
+    assert code == 0 and 'Enviados ahora: 2' in output
     assert [m['To'] for m in FakeSMTP.instances[0].sent] == ['a@example.test', 'b@example.test']
 
 
 def test_job_uses_previous_full_week_by_default():
     lines = []
-    job.run([], env={}, load_raw=lambda: comet_tiny.build(), stored=({}, None), now=pd_ts('2026-03-25'), out=lines.append)
+    job.run([], env={}, load_raw=lambda: comet_tiny.build(), stored=({}, job.NO_PERIODS, None), now=pd_ts('2026-03-25'),
+            out=lines.append)
     assert 'semana del 16 al 22 de marzo de 2026' in '\n'.join(lines)
 
 
@@ -111,7 +115,8 @@ def pd_ts(text):
 def test_job_warns_when_stored_rules_are_unavailable():
     lines = []
     job.run(['--week-of', '2026-03-16'], env={}, load_raw=lambda: comet_tiny.build(),
-            stored=({}, 'Falta aplicar db/portal/003_comet_followup.sql en Supabase.'), now=comet_tiny.TODAY, out=lines.append)
+            stored=({}, job.NO_PERIODS, 'Falta aplicar db/portal/003_comet_followup.sql en Supabase.'),
+            now=comet_tiny.TODAY, out=lines.append)
     assert 'se usan las reglas por defecto' in lines[0]
 
 
@@ -121,7 +126,7 @@ def test_portal_screens_never_use_the_job_only_store_function():
         tree = ast.parse(path.read_text(encoding='utf8'))
         names = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)} | \
                 {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-        assert 'load_all_for_job' not in names, f'{path} no debe usar load_all_for_job'
+        assert not {n for n in names if n.endswith('_for_job')}, f'{path} no debe usar funciones *_for_job'
 
 
 def test_demo_data_is_deterministic_and_fictional():

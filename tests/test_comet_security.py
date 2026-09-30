@@ -65,7 +65,7 @@ def test_cached_comet_data_is_not_served_to_scout(modules, monkeypatch):
     with security.session_scope({}, verified_user=ADMIN):
         context.load_raw()
     served = queries.call_count
-    assert served == 4, 'una consulta por tabla'
+    assert served == 5, 'una consulta por tabla más la de columnas disponibles'
     with security.session_scope({}, verified_user=SCOUT), pytest.raises(PermissionError):
         context.load_raw()
     with security.session_scope({}, verified_user=ADMIN):
@@ -181,8 +181,8 @@ def test_migration_003_stays_in_private_portal_schema_and_grants_nothing_public(
     assert 'public.' not in code and 'comet_reader' not in code and 'scouting_runtime' not in code
     assert not re.search(r'GRANT[^;]*\b(anon|authenticated|PUBLIC)\b', code, re.I | re.S)
     assert not re.search(r'GRANT[^;]*\bDELETE\b', code, re.I | re.S), 'nada se borra: solo se desactiva'
-    assert code.count('ENABLE ROW LEVEL SECURITY') == 3
-    for table in ('comet_settings', 'comet_player_marks', 'comet_selection_periods'):
+    assert code.count('ENABLE ROW LEVEL SECURITY') == 4
+    for table in ('comet_settings', 'comet_player_marks', 'comet_selection_periods', 'comet_digest_deliveries'):
         assert f'portal.{table}' in code
 
 

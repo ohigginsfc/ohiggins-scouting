@@ -154,13 +154,13 @@ def test_player_summary_matches_hand_calculation():
     p1 = row(comp, 1, competition_id='100')
     assert (p1.cited, p1.started, p1.sub_in, p1.only_called, p1.played) == (3, 2, 0, 1, 2)
     assert (p1.minutes, p1.goals, p1.yellow_cards, p1.red_cards) == (140, 1, 2, 0)
-    assert p1.possible_minutes == 240 and p1.participation_pct == pytest.approx(58.3)
+    assert p1.possible_minutes == 240 and p1.participation_pct == pytest.approx(140 / 240 * 100)
     assert (p1.wins_with, p1.draws_with, p1.losses_with, p1.results_with, p1.win_pct_with) == (1, 1, 0, 2, 50.0)
 
     p2 = row(comp, 2, competition_id='100')
     assert (p2.cited, p2.started, p2.sub_in, p2.only_called, p2.played) == (3, 2, 1, 0, 3)
     assert (p2.minutes, p2.goals, p2.yellow_cards) == (190, 1, 1)
-    assert p2.participation_pct == pytest.approx(79.2) and p2.win_pct_with == pytest.approx(33.3)
+    assert p2.participation_pct == pytest.approx(190 / 240 * 100) and p2.win_pct_with == pytest.approx(100 / 3)
 
     p3 = row(comp, 3, competition_id='100')
     assert (p3.minutes, p3.only_called, p3.wins_with, p3.results_with) == (160, 1, 1, 2)
@@ -191,17 +191,51 @@ def test_possible_minutes_rules_from_first_call_and_selection_periods():
     assert row(comp_first, 1, competition_id='100').possible_minutes == 240
     assert row(comp_first, 2, competition_id='100').possible_minutes == 320, 'P2 sí fue citado en el partido 9'
 
-    periods = pd.DataFrame([dict(personid='1', start=pd.Timestamp('2026-03-14'), end=pd.Timestamp('2026-03-15'),
+    # P1 no jugó el partido 3 (21-03): dentro de un período de selección se descuenta de sus minutos posibles.
+    periods = pd.DataFrame([dict(personid='1', start=pd.Timestamp('2026-03-21'), end=pd.Timestamp('2026-03-22'),
                                  kind='microciclo', active=True)])
     comp_off, _ = summaries(ds, periods)
     assert row(comp_off, 1, competition_id='100').possible_minutes == 320, 'con la regla apagada solo se muestran'
     ds_on, _ = dataset(Rules({'exclude_selection_periods': {'value': True}}), extra_sheet=sheet, extra_matches=[earlier])
     comp_on, _ = summaries(ds_on, periods)
     p1 = row(comp_on, 1, competition_id='100')
-    assert p1.possible_minutes == 240 and p1.participation_pct == pytest.approx(58.3)
+    assert p1.possible_minutes == 240 and p1.participation_pct == pytest.approx(140 / 240 * 100)
     assert row(comp_on, 2, competition_id='100').possible_minutes == 320, 'otros jugadores no se ven afectados'
     retired = periods.assign(active=False)
     assert row(summaries(ds_on, retired)[0], 1, competition_id='100').possible_minutes == 320
+
+
+def test_selection_periods_never_push_participation_above_100_percent():
+    """Hallazgo de la revisión: 140 min jugados sobre 80 posibles daba 175 %. Numerador y denominador usan
+    el mismo conjunto de partidos y un partido jugado nunca se descuenta."""
+    periods = pd.DataFrame([dict(personid='1', start=pd.Timestamp('2026-03-14'), end=pd.Timestamp('2026-03-22'),
+                                 kind='microciclo', active=True)])   # cubre el partido 2 (jugó 60') y el 3 (no jugó)
+    ds, raw = dataset(Rules({'exclude_selection_periods': {'value': True}}))
+    comp, cat = summaries(ds, periods)
+    p1 = row(comp, 1, competition_id='100')
+    assert p1.possible_minutes == 160, 'el partido 3 (no jugado) se descuenta; el 2 (jugado) cuenta'
+    assert p1.counted_minutes == 140 and p1.participation_pct == pytest.approx(87.5)
+    assert (comp['participation_pct'].dropna() <= 100).all()
+    report = quality.data_quality(ds, raw['sheet'], raw['matches'], periods, comp).set_index('control')
+    assert report.loc['Partidos jugados dentro de un período de selección', 'cantidad'] == 1, 'la contradicción se avisa'
+    assert report.loc['Participación superior al 100 %', 'nivel'] == 'Correcto'
+
+
+def test_overlapping_periods_and_minutes_outside_the_possible_set_are_reported():
+    periods = pd.DataFrame([
+        dict(personid='1', start=pd.Timestamp('2026-03-10'), end=pd.Timestamp('2026-03-20'), kind='microciclo', active=True),
+        dict(personid='1', start=pd.Timestamp('2026-03-15'), end=pd.Timestamp('2026-03-25'), kind='mundial', active=True),
+        dict(personid='2', start=pd.Timestamp('2026-01-01'), end=pd.Timestamp('2026-01-05'), kind='mundial', active=False)])
+    ds, raw = dataset()
+    report = quality.data_quality(ds, raw['sheet'], raw['matches'], periods).set_index('control')
+    assert report.loc['Períodos de selección solapados', 'cantidad'] == 1
+    # Con la duración nominal elegida y sin duración nominal, los minutos jugados quedan fuera del conjunto de posibles.
+    nominal, raw_n = dataset(Rules({'duration_source': {'value': 'nominal'}}))
+    comp, _ = summaries(nominal)
+    assert pd.isna(row(comp, 1, competition_id='100').possible_minutes), 'sin duración nominal no se cambia de fuente a escondidas'
+    assert pd.isna(row(comp, 1, competition_id='100').participation_pct)
+    report_n = quality.data_quality(nominal, raw_n['sheet'], raw_n['matches'], periods, comp).set_index('control')
+    assert report_n.loc['Minutos jugados fuera de los partidos que cuentan como posibles', 'cantidad'] > 0
 
 
 def test_matches_without_recorded_minutes_are_not_assumed_to_last_90():
@@ -442,16 +476,17 @@ def test_quality_report_flags_each_kind_of_data_problem():
              sheet_row(99, 1, True, True, 80)]                           # partido que no existe
     ds, raw = dataset(extra_sheet=extra)
     report = quality.data_quality(ds, raw['sheet'], raw['matches']).set_index('control')
-    for control in ['Jugador repetido en un partido', 'Jugó y sin minutos', 'Minutos sin marca de jugó',
+    for control in ['Filas repetidas contradictorias (jugador y partido)', 'Jugó y sin minutos', 'Minutos sin marca de jugó',
                     'Minutos fuera de rango', 'Filas de planilla sin partido', 'Jugadores sin ficha']:
         assert report.loc[control, 'cantidad'] >= 1 and report.loc[control, 'nivel'] in ('Aviso', 'Error'), control
-    assert report.loc['Jugador repetido en un partido', 'nivel'] == 'Error'
+    assert report.loc['Filas repetidas contradictorias (jugador y partido)', 'nivel'] == 'Error'
     clean_ds, clean_raw = dataset()
     clean = quality.data_quality(clean_ds, clean_raw['sheet'], clean_raw['matches']).set_index('control')
     assert 'Error' not in set(clean['nivel'])
+    assert list(clean.index[clean['nivel'] == 'Aviso']) == ['Partidos sin arquero registrado']
     assert clean.loc['Partidos sin arquero registrado', 'cantidad'] == 2, 'los partidos 2 y 4 no traen arquero en el mini-torneo'
     assert clean.loc['Goles de jugadores distintos del marcador', 'nivel'] == 'Información'
-    assert (clean.drop(['Partidos sin arquero registrado', 'Goles de jugadores distintos del marcador'])['nivel'] == 'Correcto').all()
+    assert clean.loc['Filas repetidas contradictorias (jugador y partido)', 'nivel'] == 'Correcto'
 
 
 def test_quality_detects_sheets_that_only_list_players_who_played():
