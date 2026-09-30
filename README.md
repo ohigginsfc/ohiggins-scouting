@@ -10,6 +10,11 @@ en Supabase Auth. Administración accede a COMET y scouting; el rol scout solo a
 scouting y puede editar sus propios informes. Los datos deportivos conservan sus
 esquemas y las sincronizaciones continúan como procesos independientes.
 
+COMET incluye, solo para administración, el [seguimiento deportivo](docs/comet-seguimiento-deportivo.md)
+pedido por el club: partido semanal, rankings por categoría, ficha del jugador, indicadores, alertas
+automáticas, jugadores adelantados y configuración. Se puede revisar sin datos reales con
+`streamlit run scripts/demo_comet_followup.py --server.address=127.0.0.1` (datos ficticios).
+
 Consultar el [manual de cuentas, permisos y despliegue del portal](docs/unified-portal.md).
 Utiliza `.env.portal` y `docker-compose.portal.yml`, con puerto local 18502 por
 defecto. La aplicación anterior se mantiene disponible para una transición en paralelo.
