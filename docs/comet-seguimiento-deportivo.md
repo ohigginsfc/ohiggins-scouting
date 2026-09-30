@@ -39,18 +39,21 @@ Estado: ✅ implementado · 🟠 implementado con una regla provisional (pendien
 | Suplentes que no ingresaron | ✅* | Bloque propio. *Requiere que COMET entregue a los suplentes sin ingresar; el control de calidad avisa si no lo hace |
 | No citados que no participaron | 🟠 | Referencial: figuran en otra planilla de la misma competición. No se conoce a quien nunca fue citado |
 | Minutos jugados por jugador | ✅ | Columna *Minutos* |
-| Goles y tarjetas amarillas / rojas | ✅ | Columnas por jugador |
+| Goles y tarjetas amarillas / rojas | ✅ | Columnas por jugador, más *2.ª amarilla* (`secondyellow`) y *Autogoles* (`owngoals`), que existen en COMET y se muestran aparte |
 | Goles recibidos por arquero | ✅ | Bloque *Goles recibidos por arquero* |
+| Filas repetidas jugador/partido | ✅ | Idénticas: se cuenta una. Contradictorias: no se elige ninguna, el partido lo avisa y el jugador queda con cifras incompletas |
 | Resultado con el jugador en cancha | 🟠 | Resultado final del partido en que el jugador sumó al menos el mínimo de minutos (por defecto 1) |
 
 ### Ranking por categoría
 
 Minutos jugados ✅ · Goles ✅ · Tarjetas amarillas y rojas ✅ · Partidos ganados con el jugador en cancha 🟠.
 Filtro por temporada y categoría; los empates comparten posición; quien no tiene datos o está en 0 no entra.
+Los jugadores con planillas contradictorias (ver más abajo) no entran y se listan en un aviso.
 
 ### Información individual
 
-Perfil con datos personales y deportivos ✅ (nombre, nacimiento, edad, nacionalidad, nivel y estado; ver dependencias) ·
+Perfil con datos personales y deportivos ✅ (nombre, nacimiento, edad por aniversario, nacionalidad, nivel, estado, `datefrom`, estatura y peso
+con cobertura parcial: lo que falta se ve como «—», sin convertir unidades) ·
 Historial de minutos, partidos, goles y tarjetas ✅ · Categoría en que juega vs categoría por edad 🟠 ·
 Evolución de minutos por mes o semestre ✅ (solo períodos con partidos; un mes sin partidos no se dibuja como 0).
 
@@ -58,10 +61,10 @@ Evolución de minutos por mes o semestre ✅ (solo períodos con partidos; un me
 
 | Indicador | Estado |
 |---|---|
-| % de participación (minutos jugados / minutos posibles) | 🟠 |
+| % de participación (minutos jugados / minutos posibles) | 🟠 (numerador y denominador salen del mismo conjunto de partidos; el porcentaje no se redondea antes de compararlo con un umbral) |
 | % de victorias con el jugador en cancha | 🟠 |
 | Promedio de edad por categoría | 🟠 (depende de la fecha de corte) |
-| Promedio de antigüedad por categoría | 🟠 (mínimo: desde el primer partido registrado) |
+| Promedio de antigüedad por categoría | 🟠 (por defecto desde el primer partido registrado, que es un mínimo; la regla permite usar `datefrom`, sin dato si falta) |
 | Relación edad y categoría actual | 🟠 |
 | Minutos totales de la serie y de jugadores 1, 2 y 3 años menores | 🟠 (se agrega «4 o más» para que cuadre el total) |
 | Partidos por jugador: titular, suplente que ingresó, solo citación | ✅ |
@@ -72,15 +75,15 @@ Evolución de minutos por mes o semestre ✅ (solo períodos con partidos; un me
 
 | Requisito | Estado | Detalle |
 |---|---|---|
-| Jugador con 4 amarillas | 🟠 | Alerta con 4 **o más**, dentro de cada competición (ciclo pendiente) |
-| Menos del 20 % de los minutos posibles | 🟠 | Estrictamente menor que 20 %, sobre la categoría principal de la temporada |
+| Jugador con 4 amarillas | 🟠 | Alerta con 4 **o más**, dentro de cada competición (ciclo pendiente). Las segundas amarillas se avisan en el detalle pero no se suman |
+| Menos del 20 % de los minutos posibles | 🟠 | Estrictamente menor que 20 %, comparando minutos × 100 con umbral × posibles (1199 de 6000 = 19,98 % alerta; 1200 no), sobre la categoría principal de la temporada |
 | Jugando en categorías superiores | 🟠 | Con minutos en una categoría superior a la que le corresponde por edad |
 | Más de 2 temporadas sin promoción | 🟠 | 3 o más temporadas seguidas en la misma categoría, según el historial disponible; un hueco de temporadas corta el conteo |
 | Adelantados: quiénes, minutos, % por categoría, permanencia, comparación con su grupo de edad | 🟠 | Pantalla *Jugadores adelantados* |
 | Configurar alertas y colores | ✅ | Umbral, activación y color por alerta (el nombre siempre acompaña al color) |
-| Resúmenes y alertas semanales | 🟠 | Vista previa y descarga en pantalla; script `scripts/send_comet_weekly_digest.py`. **No hay envío programado ni activado** |
+| Resúmenes y alertas semanales | 🟠 | Vista previa y descarga en pantalla; script `scripts/send_comet_weekly_digest.py` con el mismo cálculo que las pantallas y registro de entregas. **No hay envío programado ni activado** |
 | Jugadores proyectados o de selección | ✅ | Desde la ficha del jugador |
-| Períodos de microciclo, Sudamericano o Mundial | ✅ | Desde la ficha; opcionalmente descuentan minutos posibles (regla apagada por defecto) |
+| Períodos de microciclo, Sudamericano o Mundial | ✅ | Desde la ficha; opcionalmente descuentan minutos posibles solo de partidos que el jugador no jugó (regla apagada por defecto) |
 
 Marcas, períodos y reglas se guardan en Supabase y **requieren aplicar la migración 003** (ver más abajo).
 Sin ella las pantallas funcionan con los valores por defecto y en solo lectura.
@@ -92,52 +95,67 @@ visible en pantalla, y se cambia o se confirma desde *Seguimiento y configuraci�
 
 | # | Pregunta en lenguaje sencillo | Criterio provisional |
 |---|---|---|
-| 1 | Cuando dicen «resultado con el jugador en cancha», ¿es el resultado final del partido en que jugó (aunque haya entrado a los 85') o el marcador mientras estuvo dentro? | Resultado final del partido en que sumó al menos 1 minuto. Lo segundo necesita el minuto de goles y cambios, que COMET no entrega |
-| 2 | ¿Qué partidos cuentan como «minutos posibles»? ¿Todos los de la serie o solo desde que el jugador llegó? ¿Entran amistosos y copas? ¿Cuánto dura un partido en cada categoría? | Todos los partidos ya jugados de la competición donde el jugador fue citado; duración = el minuto más largo registrado en ese partido (sin minutos registrados, el partido no cuenta) |
+| 1 | Cuando dicen «resultado con el jugador en cancha», ¿es el resultado final del partido en que jugó (aunque haya entrado a los 85') o el marcador mientras estuvo dentro? | Resultado final del partido en que sumó al menos 1 minuto. Lo segundo necesita el minuto de goles y cambios: podría estar en la tabla `eventos_partido`, a la que el lector del portal aún no tiene acceso (falta una revisión autorizada de su contenido) |
+| 2 | ¿Qué partidos cuentan como «minutos posibles»? ¿Todos los de la serie o solo desde que el jugador llegó? ¿Entran amistosos y copas? ¿Sirve la duración reglamentaria (`matchlength`) o los minutos realmente jugados? ¿Qué estados de partido (`matchstatus`) no cuentan? | Todos los partidos ya jugados de la competición donde el jugador fue citado; duración = el minuto más largo registrado (regla elegible: nominal); sin el dato elegido el partido no cuenta; estados excluidos: ninguno |
 | 3 | ¿De dónde sale la lista oficial del plantel de cada serie para saber quién no fue citado? | Quienes figuran en otra planilla de la misma competición |
 | 4 | ¿A qué fecha se mide la edad para decir en qué categoría le corresponde jugar a un jugador? ¿Un jugador de 14 años en U-15 es «adelantado»? | 31 de diciembre del año de la temporada; la categoría por edad es la U-N más pequeña cuyo tope alcanza para su edad |
-| 5 | ¿La antigüedad es desde que entró al club? ¿Qué es «promoción»: subir de serie al año siguiente o también jugar partidos en la superior? ¿U-19 y Primer Equipo entran en la alerta? | Antigüedad = desde el primer partido registrado (es un mínimo). Promoción = la categoría principal de la temporada es mayor que la del año anterior; Primer Equipo no se evalúa |
-| 6 | ¿Las amarillas se acumulan por campeonato o por temporada? ¿Se borran al cumplir una fecha de suspensión? ¿La doble amarilla cuenta? | Por competición, solo amarilla simple, sin descontar suspensiones |
+| 5 | ¿La antigüedad es desde que entró al club? La ficha trae `datefrom` para la mayoría: ¿es la fecha de ingreso? ¿Qué es «promoción»: subir de serie al año siguiente o también jugar partidos en la superior? ¿U-19 y Primer Equipo entran en la alerta? | Antigüedad = desde el primer partido registrado (un mínimo; la regla permite `datefrom`). Promoción = la categoría principal de la temporada es mayor que la del año anterior; Primer Equipo no se evalúa |
+| 6 | ¿Las amarillas se acumulan por campeonato o por temporada? ¿Se borran al cumplir una fecha de suspensión? ¿La segunda amarilla (`secondyellow`) cuenta como una o como dos amarillas? | Por competición; las segundas amarillas se muestran y se avisan, pero no se suman; sin descontar suspensiones |
 | 7 | ¿Quiénes reciben el resumen semanal, qué día y a qué hora? Incluye nombres de menores: ¿se puede enviar por correo? | Sin destinatarios: no se envía nada |
 
-## Datos que debería aportar el pipeline de COMET
+## Datos de COMET: qué se usa, qué hay que confirmar y qué falta
 
-No se modifica `dataProject`. Esta lista también está en *Seguimiento y configuración → Calidad de datos y dependencias*.
+No se modifica `dataProject` ni se conceden permisos. Esta tabla también está en *Seguimiento y configuración → Calidad de datos y dependencias*.
+Ninguna fila dice que un dato «falta» sin haberlo comprobado: un dato sin acceso no es un dato ausente.
 
-| Dato que falta | Para qué | Qué se hace hoy |
-|---|---|---|
-| Citación completa (incluidos suplentes que no ingresaron) | Suplentes que no ingresaron, «solo citación» | Se usan las filas marcadas como que no jugaron; si no vienen, quedan vacías y el control de calidad lo avisa |
-| Plantel oficial por categoría y temporada | No citados; minutos posibles exactos | Referencial por planillas |
-| Minuto de cada gol, tarjeta y cambio | Marcador mientras el jugador estuvo en cancha | Resultado final del partido |
-| Fecha de ingreso al club | Antigüedad real | Desde el primer partido registrado |
-| Historial de categorías anterior al primer año disponible | Temporadas sin promoción | Solo el historial que hay; el aviso indica desde qué año |
-| Duración por categoría y estado del partido (suspendido, W.O.) | Minutos posibles | Minuto más largo registrado |
-| Doble amarilla, expulsión por acumulación, suspensiones cumplidas | Ciclo de tarjetas | Solo amarilla simple |
-| Ficha ampliada (posición, pie, estatura, peso) | Perfil deportivo | Nombre, nacimiento, nacionalidad, nivel y estado |
-| Autogoles diferenciados | Goles por jugador vs marcador | El control de calidad avisa si no suman |
+| Dato | Estado | Para qué | Qué se hace hoy |
+|---|---|---|---|
+| Citación completa (con suplentes que no ingresaron) | No disponible en los datos leídos | Suplentes que no ingresaron, «solo citación» | Se usan las filas marcadas como que no jugaron; si no vienen, quedan vacías y el control de calidad lo avisa |
+| Plantel oficial por categoría y temporada | No disponible en los datos leídos | No citados; minutos posibles exactos | Referencial por planillas |
+| Cronología del partido: tabla `eventos_partido` | Sin acceso del lector del portal | Marcador mientras el jugador estuvo en cancha | La tabla existe; no se comprobó su contenido ni se concedieron permisos. Falta una inspección autorizada. Mientras tanto, resultado final del partido |
+| `jugadores.datefrom` | Existe: significado por confirmar | Antigüedad en el club | La mayoría de las fichas la trae. Por defecto la antigüedad cuenta desde el primer partido; la regla permite `datefrom` (sin dato si falta, sin sustituirla) |
+| Historial de categorías anterior al primer año leído | No disponible en los datos leídos | Temporadas sin promoción | La muestra leída llega a 2025-2026: la alerta no puede certificarse con ese horizonte |
+| `competiciones.matchlength` y `partidos.matchstatus` | Existe: significado por confirmar | Minutos posibles | Se leen. Duración registrada y nominal difieren en algunos partidos y ninguna es «la correcta» por sí sola: una regla elige la fuente y otra excluye estados. Falta contrastar con el club |
+| `actuaciones_jugadores.secondyellow` | Existe: en uso | Ciclo de tarjetas | Se muestra y se avisa en la alerta; no se suma. Falta definir cómo cuenta y las suspensiones cumplidas |
+| `actuaciones_jugadores.owngoals` | Existe: en uso | Goles por jugador vs marcador | Se muestra aparte; no cuenta como gol a favor. Las filas son solo de O'Higgins |
+| Estatura y peso del jugador | Existe: en uso (cobertura parcial) | Perfil deportivo | Se muestran con «—» cuando faltan y sin convertir unidades. Posición y pie hábil no figuran en las columnas leídas |
+
+Las columnas opcionales se piden solo si `information_schema` dice que existen; si falta alguna, llega como dato ausente y la pantalla no se rompe.
+Los nombres de estatura y peso se buscan entre `height`/`heightcm`/`estatura`/`altura` y `weight`/`weightkg`/`peso`; si COMET usa otros, hay que añadirlos a `HEIGHT_CANDIDATES`/`WEIGHT_CANDIDATES` en `queries.py`.
 
 ## Seguridad y datos
 
 * **Permisos.** Todas las funciones nuevas (carga de datos, contexto y pantallas) llevan `@admin_only` **por fuera de la caché**, igual que `comet_dashboard`:
   un resultado en caché no se entrega a quien no sea Admin. `portal.py` sigue llamando `require_admin()` antes de importar nada de COMET.
   Las pruebas lo verifican por cada función, con Scout y sin sesión, y comprueban que no se abre ninguna conexión.
-* **COMET solo se lee**, con el rol `comet_reader` existente (solo `SELECT`). Las consultas usan únicamente columnas que ya consultan las pantallas actuales y piden solo las filas
-  de O'Higgins y los jugadores de sus planillas (minimización de datos de menores). No se cruza con scouting.
+* **COMET solo se lee**, con el rol `comet_reader` existente (solo `SELECT`). Las consultas piden las columnas que ya consultan las pantallas actuales, más las opcionales
+  que `information_schema` confirma (solo de las cinco tablas que el portal usa), y solo las filas de O'Higgins y los jugadores de sus planillas
+  (minimización de datos de menores). No se concede ningún permiso nuevo. No se cruza con scouting.
 * **La configuración vive en el esquema privado `portal`** (nunca en `public`), con la conexión `portal_runtime` que ya usan las cuentas.
-  Cada escritura registra quién y cuándo. No hay `DELETE`: marcas y períodos se desactivan y conservan su historial.
+  Cada fila guarda el **último** autor y fecha; las reglas y marcas se actualizan en el lugar, así que **no son una auditoría histórica completa**
+  (no conservan versiones anteriores). No hay `DELETE`: marcas y períodos se desactivan (el retiro de un período registra quién y cuándo).
 * **Sin secretos.** Nada de contraseñas, `.env` ni datos reales en el repositorio; el correo se configura por variables de entorno.
 
 ### Migración `db/portal/003_comet_followup.sql` (no aplicada)
 
-Crea `portal.comet_settings`, `portal.comet_player_marks` y `portal.comet_selection_periods`, con RLS y permisos solo para `portal_runtime`
+Crea `portal.comet_settings`, `portal.comet_player_marks`, `portal.comet_selection_periods` y `portal.comet_digest_deliveries` (registro de entregas del resumen semanal), con RLS y permisos solo para `portal_runtime`
 (nada para `anon`, `authenticated`, `scouting_runtime` ni `comet_reader`). Es idempotente. **Debe aplicarla el propietario de la BD después de revisarla**,
 igual que `001` y `002`; esta PR no la aplica ni cambia producción. Reversión: no borrar esquemas; basta dejar de usar las pantallas (las tablas no afectan otras funciones).
 
 ## Resumen semanal por correo
 
 `scripts/send_comet_weekly_digest.py` genera el resumen (partidos de la semana anterior, goleadores, tarjetas, goles recibidos y alertas vigentes).
-**Por defecto solo muestra una vista previa.** Con `--send` envía únicamente si: (1) la regla de destinatarios tiene correos y está *confirmada por el club*,
-(2) hay servicio de correo (`COMET_DIGEST_SMTP_HOST` y `COMET_DIGEST_SMTP_FROM`; la clave solo por entorno) y (3) se pasó `--send`. Si falta algo, sale con código 2 sin enviar.
+**Por defecto solo muestra una vista previa.** Usa el mismo cálculo que las pantallas (`scouting.comet.pipeline`): mismas reglas, mismos períodos de selección
+y mismas alertas, así que el correo y la pantalla no pueden discrepar para la misma semana.
+
+Con `--send` envía únicamente si: (1) la regla de destinatarios tiene correos y está *confirmada por el club*,
+(2) hay servicio de correo (`COMET_DIGEST_SMTP_HOST` y `COMET_DIGEST_SMTP_FROM`; la clave solo por entorno), (3) hay registro de entregas
+(`PORTAL_AUTH_DATABASE_URL` con la migración 003) y (4) se pasó `--send`. Si falta algo, sale con código 2 sin enviar.
+
+**Como mucho una entrega por semana y destinatario.** Cada correo se reserva en `portal.comet_digest_deliveries` (clave primaria semana + destinatario, `INSERT` atómico)
+*antes* de enviarse. Dos ejecuciones de la misma semana no lo repiten aunque corran a la vez. Un envío que falla queda `fallido` y se reintenta en la próxima
+ejecución hasta `--max-attempts` (3 por defecto). Una reserva que quedó sin cerrar (el proceso murió a medias) **no se reenvía sola**: el correo pudo haber salido, así que
+se informa como «en duda» para confirmarla a mano. Código de salida 1 si algo quedó fallido, agotado o en duda.
 
 ```bash
 docker compose --env-file .env.portal -f docker-compose.portal.yml run --rm portal \
@@ -163,7 +181,7 @@ Comprobación de accesos con el portal real: Admin ve las doce secciones de COME
 
 | Ruta | Contenido |
 |---|---|
-| `src/scouting/comet/` | Cálculos puros: categorías, reglas, datos, métricas, alertas, indicadores, adelantados, calidad, resumen, correo, consultas y almacén de configuración |
+| `src/scouting/comet/` | Cálculos puros: categorías, reglas, datos, métricas, alertas, indicadores, adelantados, calidad, `pipeline` (cálculo compartido con el resumen), resumen, correo, `ledger` (registro de entregas), consultas y almacén de configuración |
 | `app/comet_context.py` | Carga de datos y contexto con permisos y caché |
 | `app/comet_followup.py`, `app/comet_insights.py` | Las siete pantallas |
 | `app/ui/comet_widgets.py` | Formato «—», etiquetas de estado, colores accesibles |
@@ -171,6 +189,22 @@ Comprobación de accesos con el portal real: Admin ve las doce secciones de COME
 | `scripts/send_comet_weekly_digest.py` | Resumen semanal (vista previa por defecto) |
 | `scripts/comet_demo_*.py`, `scripts/demo_comet_followup.py` | Datos ficticios y demostración local |
 | `tests/test_comet_*.py`, `tests/comet_tiny.py` | Pruebas (cálculos a mano, seguridad, pantallas, SQL y migración) |
+
+## Correcciones tras la revisión del 30-09-2026
+
+Cada hallazgo se reprodujo primero con datos ficticios y después se corrigió con pruebas (`tests/test_comet_review_fixes.py`, `tests/test_comet_postgres.py`).
+
+| # | Hallazgo | Corrección |
+|---|---|---|
+| 1 | La ficha fallaba con nacimientos `datetime64[ns, UTC]` (restaba `ctx.today`, sin zona) | El nacimiento se normaliza como **fecha civil** (`facts.civil_date`: el día en UTC, sin convertir a la hora de Santiago, que retrocedería un día). La edad se calcula por **aniversario** (`age_on`, 29 de febrero incluido), sin dividir días por 365,25. Prueba con `timestamptz` real en PostgreSQL y con la pantalla |
+| 2 | Las filas repetidas jugador/partido inflaban minutos, goles y titularidades | Se distinguen: **idénticas** se cuentan una vez; **contradictorias** no se resuelven adivinando (la fuente no trae versión ni fecha de corrección): sus valores quedan sin dato, el jugador se marca *incompleto* y sale de rankings y alertas, y el partido, el ranking, la ficha y el resumen lo avisan. Aplica también a arqueros. Detalle en *Calidad de datos* |
+| 3 | 1199/6000 = 19,98 % se mostraba como 20,0 % y no alertaba | Los porcentajes ya no se redondean en el cálculo; la alerta compara `minutos × 100 < umbral × posibles`. Solo la pantalla redondea; el detalle de la alerta trunca a 2 decimales para no mostrar «20,00 %» bajo un umbral de 20 % |
+| 4 | Excluir períodos de selección daba 175 % de participación | Numerador y denominador salen del **mismo conjunto de partidos** (`possible_grid`). Un partido dentro de un período solo se descuenta si el jugador **no lo jugó**; si lo jugó cuenta y la contradicción se avisa. No se recorta a 100 %: *Calidad de datos* avisa cualquier participación mayor a 100 %, los períodos solapados y los partidos jugados dentro de un período |
+| 5 | El resumen por correo ignoraba los períodos y podía enviarse dos veces | El script usa el mismo `pipeline` que las pantallas. Nuevo registro de entregas con reserva atómica, reintento limitado y sin reenvío ante la duda (ver arriba). No hay envío activado ni programado |
+| 6 | Se declaraban ausentes datos que existen en COMET | Se leen `matchlength`, `matchstatus`, `secondyellow`, `owngoals`, `datefrom`, estatura y peso (si existen). Nuevas reglas: fuente de duración (registrada/nominal), estados de partido que no cuentan y fuente de antigüedad (primer partido/`datefrom`). `eventos_partido` figura como «sin acceso del lector», no como ausente; no se concedió ningún permiso |
+
+**Sobre el alcance de la muestra.** La alerta de más de dos temporadas sin promoción no puede certificarse con solo las temporadas 2025 y 2026: tiene implementación y pruebas sintéticas, pero su resultado real depende de un historial más largo.
+Las temporadas históricas de Sofascore pertenecen a Scouting y no cuentan aquí.
 
 ## Hallazgos que no se tocaron
 

@@ -50,7 +50,8 @@ Supabase controla los límites de intentos. Se conserva siempre un admin activo.
    propietario de la BD, después de revisarlos. No son migraciones automáticas de
    scouting. Definir privadamente las contraseñas de `portal_runtime` y `comet_reader`.
    Para guardar reglas, alertas, marcas y períodos del seguimiento deportivo de COMET, aplicar
-   también `db/portal/003_comet_followup.sql` (solo esquema `portal`; sin ella esas pantallas
+   también `db/portal/003_comet_followup.sql` (solo esquema `portal`; incluye el registro de
+   entregas del resumen semanal, sin el cual el script no envía nada; sin ella esas pantallas
    funcionan con valores por defecto y en solo lectura). Ver
    [Seguimiento deportivo COMET](comet-seguimiento-deportivo.md).
 2. Copiar `.env.portal.example` a `.env.portal` y completar las tres conexiones
