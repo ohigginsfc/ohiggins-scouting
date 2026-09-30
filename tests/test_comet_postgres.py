@@ -276,7 +276,9 @@ def test_migration_003_is_idempotent_private_and_without_delete(portal_db):
             assert db.execute("SELECT relrowsecurity FROM pg_class WHERE oid = %s::regclass", (f'portal.{table}',)).fetchone()[0]
             grants = db.execute("SELECT grantee, privilege_type FROM information_schema.role_table_grants "
                                 "WHERE table_schema='portal' AND table_name=%s", (table,)).fetchall()
-            assert {g for g, _ in grants} <= {'portal_runtime', 'postgres'}, f'{table}: permisos inesperados {grants}'
+            owner = db.execute("SELECT tableowner FROM pg_tables WHERE schemaname='portal' AND tablename=%s",
+                               (table,)).fetchone()[0]  # el dueño varía: postgres en local, scouting_test en CI
+            assert {g for g, _ in grants} <= {'portal_runtime', owner}, f'{table}: permisos inesperados {grants}'
             assert 'DELETE' not in {p for g, p in grants if g == 'portal_runtime'}
         db.execute('SET ROLE authenticated')
         for table in tables:
