@@ -8,5 +8,6 @@ COPY src /app/src
 COPY app /app/app
 COPY docker/portal-config.toml /app/.streamlit/config.toml
 COPY scripts/bootstrap_portal_admin.py /app/scripts/bootstrap_portal_admin.py
+COPY scripts/send_comet_weekly_digest.py /app/scripts/send_comet_weekly_digest.py
 COPY data/images /app/data/images
 CMD ["streamlit", "run", "app/portal.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
