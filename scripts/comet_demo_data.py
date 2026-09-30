@@ -139,8 +139,43 @@ def build_raw(seed: int = 2026, today: pd.Timestamp = TODAY) -> dict:
                 keeper_rows.append(dict(matchid=match_id, competition_id=comp_id[(cat, season)], personid=keeper,
                                         played=True, minutesplayed=minutes[keeper], goalsconceded=ga))
     players = players.drop(columns='is_keeper')
-    return dict(sheet=pd.DataFrame(sheet_rows), matches=pd.DataFrame(matches), players=players,
-                goalkeepers=pd.DataFrame(keeper_rows))
+    raw = dict(sheet=pd.DataFrame(sheet_rows), matches=pd.DataFrame(matches), players=players,
+               goalkeepers=pd.DataFrame(keeper_rows))
+    return _with_real_world_details(raw, seed)
+
+
+def _with_real_world_details(raw: dict, seed: int) -> dict:
+    """Campos que COMET real trae (o puede traer) y las imperfecciones que la revisión encontró.
+
+    Usa su propia semilla para no cambiar los datos base: segunda amarilla y autogoles, duración nominal y
+    estado del partido, `datefrom`/estatura/peso parciales, nacimientos como timestamp con zona horaria y
+    unas pocas filas repetidas (una idéntica y otra contradictoria) en la planilla.
+    """
+    rng = np.random.default_rng(seed + 1)
+    sheet, matches, players = raw['sheet'].copy(), raw['matches'].copy(), raw['players'].copy()
+    played = sheet['played'].to_numpy()
+    sheet['second_yellows'] = (played & (rng.random(len(sheet)) < 0.006)).astype(int)
+    sheet['own_goals'] = (played & (rng.random(len(sheet)) < 0.004)).astype(int)
+    matches['nominal_duration'] = matches['category'].map({name: spec[1] for name, spec in CATEGORIES.items()})
+    matches['matchstatus'] = 'FINALIZADO'
+    matches.loc[matches.sample(2, random_state=seed).index, 'matchstatus'] = 'SUSPENDIDO'
+    players['dateofbirth'] = pd.to_datetime(players['dateofbirth'], utc=True)   # COMET real: con zona horaria
+    has_since = rng.random(len(players)) < 0.83
+    since = pd.to_datetime(rng.integers(2015, 2025, len(players)).astype(str) + '-03-01', utc=True)
+    players['datefrom'] = pd.Series(since.where(has_since), index=players.index)
+    measured = rng.random(len(players)) < 0.22
+    players['height'] = np.where(measured, rng.normal(164, 12, len(players)).round(0), np.nan)
+    players['weight'] = np.where(measured, rng.normal(55, 10, len(players)).round(1), np.nan)
+    # Filas repetidas en la planilla de un partido U-15 de 2026, dentro de la última semana: una idéntica
+    # (se cuenta una vez) y otra contradictoria (no se elige ninguna y el jugador queda incompleto).
+    joined = sheet.merge(matches[['matchid', 'category', 'season']], on='matchid')
+    pool = joined[(joined['category'] == 'U-15') & (joined['season'] == '2026') & joined['played']]
+    last_match = pool['matchid'].max()
+    rows = pool[pool['matchid'] == last_match].head(2)
+    identical = rows.iloc[[0]].drop(columns=['category', 'season'])
+    clashing = rows.iloc[[1]].drop(columns=['category', 'season']).assign(minutesplayed=lambda d: d['minutesplayed'] - 10)
+    sheet = pd.concat([sheet, identical, clashing], ignore_index=True)
+    return dict(sheet=sheet, matches=matches, players=players, goalkeepers=raw['goalkeepers'])
 
 
 def _weights(pool, ability):
