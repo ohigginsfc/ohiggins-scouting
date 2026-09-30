@@ -14,6 +14,8 @@ guarda contraseñas y no debe exponerse en la Data API. Los esquemas `public`
 | Capacidad | Admin | Scout |
 |---|---|---|
 | Datos federados/menores de COMET | Sí, lectura | No |
+| Seguimiento deportivo COMET (partido semanal, rankings, ficha, indicadores, alertas, adelantados) | Sí | No |
+| Configurar reglas y alertas COMET; marcar jugadores proyectados o de selección y sus períodos | Sí | No |
 | Scouting visible, estadísticas y comparaciones | Sí | Sí |
 | Crear informes | Sí | Sí |
 | Editar evaluación y recomendación | Todos | Solo propios visibles |
@@ -47,6 +49,10 @@ Supabase controla los límites de intentos. Se conserva siempre un admin activo.
 1. Aplicar explícitamente `db/portal/001_accounts.sql` y `002_comet_reader.sql` como
    propietario de la BD, después de revisarlos. No son migraciones automáticas de
    scouting. Definir privadamente las contraseñas de `portal_runtime` y `comet_reader`.
+   Para guardar reglas, alertas, marcas y períodos del seguimiento deportivo de COMET, aplicar
+   también `db/portal/003_comet_followup.sql` (solo esquema `portal`; sin ella esas pantallas
+   funcionan con valores por defecto y en solo lectura). Ver
+   [Seguimiento deportivo COMET](comet-seguimiento-deportivo.md).
 2. Copiar `.env.portal.example` a `.env.portal` y completar las tres conexiones
    independientes y las claves de Supabase Auth. La clave secreta solo va al backend;
    nunca a URLs, repositorio, navegador o logs. Usar el session pooler y SSL.
@@ -93,7 +99,10 @@ versión no implementa un flujo de recuperación por correo ni envía invitacion
 `app/comet_dashboard.py` incorpora las cinco pantallas de dataProject/main,
 commit `c6a0024b11b2e5b4fd3722017e08aadc101db180`, adaptadas al login común y a la
 conexión de lectura exclusiva del admin. No se importan ni duplican los automatismos
-de COMET. Los requisitos nuevos del club se desarrollarán por separado.
+de COMET. Los requisitos nuevos del club (partido semanal, rankings, ficha individual,
+indicadores, alertas, adelantados, marcas y resumen semanal) están descritos en
+[Seguimiento deportivo COMET](comet-seguimiento-deportivo.md); leen COMET con la misma
+conexión de solo lectura y no modifican `dataProject`.
 
 ## Estado de los informes antiguos
 
