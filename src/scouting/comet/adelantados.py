@@ -12,9 +12,16 @@ def _sum(series: pd.Series):
     return series.sum(min_count=1)
 
 
+def _complete_facts(ds: Dataset, season_year: int) -> pd.DataFrame:
+    """Una contradicción en cualquier categoría invalida las tasas comparativas de esa temporada."""
+    blocked = ds.blocked_players(season_year)['personid']
+    return ds.facts[(ds.facts['season_year'] == season_year) & ~ds.facts['personid'].isin(blocked)]
+
+
 def ahead_players(ds: Dataset, season_year: int) -> pd.DataFrame:
     """Jugadores con minutos en una categoría superior a la que les corresponde por edad."""
-    f = ds.facts[(ds.facts['season_year'] == season_year) & ds.facts['participated']]
+    f = _complete_facts(ds, season_year)
+    f = f[f['participated']]
     total = f.groupby('personid')['minutes'].agg(_sum)
     up = f[f['steps_ahead'] > 0]
     if up.empty:
@@ -37,7 +44,8 @@ def ahead_players(ds: Dataset, season_year: int) -> pd.DataFrame:
 
 def ahead_share_by_category(ds: Dataset, season_year: int) -> pd.DataFrame:
     """Porcentaje de los jugadores de cada categoría que están adelantados (juegan por encima de su edad)."""
-    f = ds.facts[(ds.facts['season_year'] == season_year) & ds.facts['participated']]
+    f = _complete_facts(ds, season_year)
+    f = f[f['participated']]
     rows = []
     for category, grp in f.groupby('category'):
         players = grp.drop_duplicates('personid')
@@ -55,7 +63,8 @@ def ahead_share_by_category(ds: Dataset, season_year: int) -> pd.DataFrame:
 
 def ahead_permanence(ds: Dataset, season_year: int) -> pd.DataFrame:
     """Minutos en la categoría superior por jugador y mes: cuánto se sostiene su permanencia en el año."""
-    f = ds.facts[(ds.facts['season_year'] == season_year) & (ds.facts['steps_ahead'] > 0) & ds.facts['participated']]
+    f = _complete_facts(ds, season_year)
+    f = f[(f['steps_ahead'] > 0) & f['participated']]
     if f.empty:
         return pd.DataFrame(columns=['personid', 'displayname', 'mes', 'minutes'])
     f = f.assign(mes=f['matchdate'].dt.strftime('%Y-%m'))
@@ -68,7 +77,7 @@ def ahead_permanence_summary(ds: Dataset, season_year: int) -> pd.DataFrame:
 
     "Desde su primera participación arriba" evita penalizarlo por partidos anteriores a su llegada.
     """
-    f = ds.facts[(ds.facts['season_year'] == season_year)]
+    f = _complete_facts(ds, season_year)
     up = f[(f['steps_ahead'] > 0) & f['participated']]
     rows = []
     for pid, grp in up.groupby('personid'):
@@ -97,7 +106,8 @@ def ahead_vs_peers(ds: Dataset, cat_summary: pd.DataFrame, season_year: int) -> 
     superior (sus cifras allí); `Grupo de edad` = jugadores de esa edad que juegan en X.
     Con pocos jugadores la comparación es solo orientativa: la columna `jugadores` lo muestra.
     """
-    cs = cat_summary[(cat_summary['season_year'] == season_year) & (cat_summary['played'] > 0)].copy()
+    cs = cat_summary[(cat_summary['season_year'] == season_year) & (cat_summary['played'] > 0)
+                     & ~cat_summary['personid'].isin(ds.blocked_players(season_year)['personid'])].copy()
     cs['steps'] = [steps_ahead(c, a, ds.categories) for c, a in zip(cs['category'], cs['age_category'])]
     cs['steps'] = pd.to_numeric(cs['steps'], errors='coerce')
     cs['group'] = np.select([cs['steps'] > 0, cs['steps'] == 0], ['Adelantados', 'Grupo de edad'], default='')

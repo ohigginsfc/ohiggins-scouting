@@ -58,19 +58,25 @@ def page_indicators() -> None:
         return
     tabs = st.tabs(['Por categoría', 'Edad y categoría', 'Minutos de jugadores más chicos', 'Partidos por jugador',
                     'Disciplina y goles', 'Participación y victorias'])
+    seniority_from_profile = ctx.rules.value('seniority_rule') == 'datefrom'
 
     with tabs[0]:
         show_table(ind, {
             'category': ('Categoría', None), 'partidos': ('Partidos', FMT_INT), 'pct_victorias': ('% victorias de la serie', FMT_PCT),
             'jugadores_citados': ('Jugadores citados', FMT_INT), 'jugadores_con_minutos': ('Jugadores con minutos', FMT_INT),
-            'edad_promedio': ('Edad promedio', FMT_1), 'antiguedad_promedio': ('Antigüedad promedio (años, mínimo)', FMT_1),
+            'edad_promedio': ('Edad promedio', FMT_1),
+            'antiguedad_promedio': ('Antigüedad promedio (años, datefrom)' if seniority_from_profile
+                                   else 'Antigüedad promedio (años, mínimo)', FMT_1),
             'participacion_pct': ('Participación (% de minutos posibles)', FMT_PCT), 'minutos_totales': ('Minutos totales de la serie', FMT_INT),
             'filas_contradictorias': ('Filas contradictorias', FMT_INT)})
         if int(ind['filas_contradictorias'].sum()):
             st.caption('Las filas contradictorias (repetidas con valores distintos) no se suman: los totales de esas series '
                        'están incompletos. Detalle en Seguimiento y configuración → Calidad de datos.')
         horizon = quality.history_horizon(ds)
-        if horizon['first'] is not None:
+        if seniority_from_profile:
+            st.caption('La antigüedad usa la fecha «datefrom» de la ficha de COMET; si falta, queda sin dato. '
+                       'La edad se mide en la fecha de corte de la temporada.')
+        elif horizon['first'] is not None:
             st.caption(f'La antigüedad cuenta desde el primer partido registrado en COMET ({horizon["first"]:%d-%m-%Y}); '
                        'es un mínimo, no la fecha real de ingreso al club. La edad se mide en la fecha de corte de la temporada.')
 
@@ -229,6 +235,11 @@ def page_adelantados() -> None:
         return
     rule_note(ctx.rules, ['age_cutoff', 'possible_from_first_call', 'min_minutes_on_pitch'])
     season = _season_picker(ctx, 'cd_season')
+    blocked = ds.blocked_players(season)
+    if len(blocked):
+        st.warning(f'{len(blocked)} jugador(es) quedan fuera de los indicadores de adelantados, permanencia y '
+                   'comparación por planillas contradictorias en esta temporada. Sus actuaciones válidas siguen '
+                   'disponibles en la ficha y los partidos. Ver Seguimiento y configuración → Calidad de datos.')
     players = adelantados.ahead_players(ds, season)
     share = adelantados.ahead_share_by_category(ds, season)
     total_minutes = share['minutos'].sum(min_count=1)

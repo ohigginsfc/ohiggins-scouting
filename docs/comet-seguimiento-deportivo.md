@@ -153,9 +153,13 @@ Con `--send` envía únicamente si: (1) la regla de destinatarios tiene correos 
 (`PORTAL_AUTH_DATABASE_URL` con la migración 003) y (4) se pasó `--send`. Si falta algo, sale con código 2 sin enviar.
 
 **Como mucho una entrega por semana y destinatario.** Cada correo se reserva en `portal.comet_digest_deliveries` (clave primaria semana + destinatario, `INSERT` atómico)
-*antes* de enviarse. Dos ejecuciones de la misma semana no lo repiten aunque corran a la vez. Un envío que falla queda `fallido` y se reintenta en la próxima
+*antes* de enviarse. Dos ejecuciones de la misma semana no lo repiten aunque corran a la vez. Un rechazo definitivo queda `fallido` y se reintenta en la próxima
 ejecución hasta `--max-attempts` (3 por defecto). Una reserva que quedó sin cerrar (el proceso murió a medias) **no se reenvía sola**: el correo pudo haber salido, así que
 se informa como «en duda» para confirmarla a mano. Código de salida 1 si algo quedó fallido, agotado o en duda.
+
+Solo se reintentan rechazos SMTP definitivos o fallos anteriores al envío. Si se pierde la conexión o la confirmación durante `send_message`, la reserva queda **en duda**: el servidor pudo aceptar el correo. No se reenvía automáticamente; el administrador debe comprobar la entrega antes de resolver la reserva.
+
+Las variables `COMET_DIGEST_SMTP_HOST`, `COMET_DIGEST_SMTP_FROM`, `COMET_DIGEST_SMTP_PORT` (587 por defecto), `COMET_DIGEST_SMTP_USER`, `COMET_DIGEST_SMTP_PASSWORD` y `COMET_DIGEST_SMTP_STARTTLS` (1 por defecto) se guardan únicamente en `.env.portal`. Compose las transmite al contenedor. Dejarlas vacías mantiene el envío deshabilitado. Después de revisar la vista previa y confirmar destinatarios, añadir `--send` al comando siguiente para enviar; sin ese argumento nunca envía.
 
 ```bash
 docker compose --env-file .env.portal -f docker-compose.portal.yml run --rm portal \
@@ -205,6 +209,10 @@ Cada hallazgo se reprodujo primero con datos ficticios y después se corrigió c
 
 **Sobre el alcance de la muestra.** La alerta de más de dos temporadas sin promoción no puede certificarse con solo las temporadas 2025 y 2026: tiene implementación y pruebas sintéticas, pero su resultado real depende de un historial más largo.
 Las temporadas históricas de Sofascore pertenecen a Scouting y no cuentan aquí.
+
+## Cierre de la segunda auditoría
+
+Los indicadores de adelantados, permanencia y comparación excluyen a jugadores con planillas contradictorias en cualquier categoría de la temporada seleccionada. La pantalla muestra cuántos se excluyen. Las actuaciones válidas siguen disponibles en la ficha y los partidos; una contradicción de otra temporada no bloquea la actual. La explicación de antigüedad refleja la fuente seleccionada (`datefrom` o primer partido).
 
 ## Hallazgos que no se tocaron
 

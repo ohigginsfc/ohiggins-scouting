@@ -96,8 +96,8 @@ def send_digest_once(digest: Digest, recipients: Sequence[str], smtp: SmtpConfig
     """Envía como mucho una vez por semana y destinatario, con registro y reintento limitado.
 
     Cada destinatario se reserva en el registro ANTES de enviar; dos ejecuciones de la misma semana no
-    envían dos veces (la segunda ve `enviado` o pierde la reserva). Un fallo deja `fallido` y se reintenta
-    en la próxima ejecución hasta `max_attempts`. Una reserva que quedó sin cerrar se informa, no se repite.
+    envían dos veces (la segunda ve `enviado` o pierde la reserva). Solo un rechazo definitivo deja
+    `fallido` para reintentar. Si se pierde la confirmación durante el envío, la reserva queda en duda.
     """
     valid = valid_recipients(recipients)
     if not valid:
@@ -135,11 +135,25 @@ def send_digest_once(digest: Digest, recipients: Sequence[str], smtp: SmtpConfig
                 server.login(smtp.username, smtp.password)
             for recipient in to_send:
                 try:
-                    server.send_message(build_message(digest, smtp.sender, recipient))
-                except Exception as exc:  # un destinatario que falla no impide los demás
+                    message = build_message(digest, smtp.sender, recipient)
+                except Exception as exc:  # todavía no se ha llamado al transporte
                     handled.add(recipient)
                     report.failed.append(recipient)
                     close(recipient, sent=False, error=_reason(exc))
+                    continue
+                try:
+                    server.send_message(message)
+                except (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused,
+                        smtplib.SMTPDataError, smtplib.SMTPHeloError, smtplib.SMTPNotSupportedError) as exc:
+                    handled.add(recipient)
+                    report.failed.append(recipient)
+                    close(recipient, sent=False, error=_reason(exc))
+                except Exception:  # DATA pudo ser aceptado antes de perder la confirmación
+                    handled.add(recipient)
+                    report.in_doubt.append(recipient)
+                    # No cerrar como fallido: se duplicaría al reintentar. Detener esta sesión;
+                    # los destinatarios aún no procesados sí pueden reintentarse.
+                    raise
                 else:
                     handled.add(recipient)
                     report.sent.append(recipient)

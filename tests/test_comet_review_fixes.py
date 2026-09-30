@@ -1,5 +1,6 @@
 """Casos reproducidos en la revisión de la PR 13 (30-09-2026), uno por hallazgo."""
 import threading
+import smtplib
 from datetime import date
 from pathlib import Path
 
@@ -258,7 +259,7 @@ class FlakySMTP(FakeSMTP):
 
     def send_message(self, message):
         if FlakySMTP.failing:
-            raise RuntimeError('boom con datos: smtp.example.test password=secreto')
+            raise smtplib.SMTPDataError(451, b'boom con datos: smtp.example.test password=secreto')
         super().send_message(message)
 
 
