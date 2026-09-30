@@ -55,6 +55,28 @@ def age_on(birth, ref: date) -> Optional[int]:
     return ref.year - birth.year - ((ref.month, ref.day) < (birth.month, birth.day))
 
 
+def _add_years(day: pd.Timestamp, years: int) -> pd.Timestamp:
+    try:
+        return day.replace(year=day.year + years)
+    except ValueError:  # 29 de febrero en un año no bisiesto: el aniversario es el 1 de marzo
+        return pd.Timestamp(year=day.year + years, month=3, day=1)
+
+
+def elapsed_years(start, end) -> Optional[float]:
+    """Años transcurridos entre dos fechas: años completos por aniversario más la fracción del año en curso.
+
+    No usa 365,25: dos personas nacidas el mismo día tienen exactamente la misma edad cumplida.
+    """
+    if start is None or end is None or pd.isna(start) or pd.isna(end):
+        return None
+    start, end = pd.Timestamp(start).normalize(), pd.Timestamp(end).normalize()
+    if end < start:
+        return None
+    years = end.year - start.year - ((end.month, end.day) < (start.month, start.day))
+    last, following = _add_years(start, years), _add_years(start, years + 1)
+    return years + (end - last).days / (following - last).days
+
+
 def season_reference_date(season_year: int, month: int = 12, day: int = 31) -> date:
     """Fecha en que se mide la edad de una temporada (por defecto 31 de diciembre)."""
     return date(int(season_year), int(month), int(day))

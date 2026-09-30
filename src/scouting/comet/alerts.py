@@ -1,6 +1,7 @@
 """Alertas automáticas de seguimiento deportivo y su color de presentación."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
@@ -76,27 +77,36 @@ def _yellow_cards(ds: Dataset, season_year: int) -> pd.DataFrame:
     keys = ['personid', 'competition_id'] if per_competition else ['personid']
     grouped = f.groupby(keys, as_index=False).agg(
         displayname=('displayname', 'first'), category=('category', 'last'),
-        competition=('competition', 'first'), value=('yellow_cards', lambda s: s.sum(min_count=1)))
+        competition=('competition', 'first'), value=('yellow_cards', lambda s: s.sum(min_count=1)),
+        second=('second_yellows', lambda s: s.sum(min_count=1)))
     hit = grouped[grouped['value'] >= threshold].copy()
     if hit.empty:
         return _empty()
     scope = hit['competition'] if per_competition else f'temporada {season_year}'
     hit['detail'] = hit['value'].astype(int).astype(str) + ' amarillas en ' + scope
+    seconds = hit['second'].fillna(0).astype(int)
+    hit.loc[seconds > 0, 'detail'] += ' (+' + seconds.astype(str) + ' segunda amarilla, no sumada)'
     return hit[['personid', 'displayname', 'category', 'value', 'detail']].assign(alert_key='yellow_cards')
+
+
+def _pct_text(value: float) -> str:
+    """Porcentaje con 2 decimales, truncado: nunca se muestra «20,00 %» bajo un umbral de 20 %."""
+    return f'{math.floor(value * 100) / 100:.2f} %'
 
 
 def _low_participation(cat_summary: pd.DataFrame, season_year: int, threshold: int) -> pd.DataFrame:
     season = cat_summary[cat_summary['season_year'] == season_year]
     principal = principal_categories(season) if len(season) else season
     hit = principal[principal['possible_minutes'].fillna(0) > 0]
-    hit = hit[hit['participation_pct'] < threshold].copy()
+    # Comparación exacta (minutos × 100 frente a umbral × posibles): nada se redondea antes de comparar.
+    hit = hit[hit['counted_minutes'].notna() & (hit['counted_minutes'] * 100 < threshold * hit['possible_minutes'])].copy()
     if hit.empty:
         return _empty()
-    hit['detail'] = (hit['participation_pct'].map('{:.1f} %'.format) + ' · '
-                     + hit['minutes'].fillna(0).astype(int).astype(str) + ' de '
+    hit['value'] = hit['counted_minutes'] / hit['possible_minutes'] * 100
+    hit['detail'] = (hit['value'].map(_pct_text) + ' · '
+                     + hit['counted_minutes'].astype(int).astype(str) + ' de '
                      + hit['possible_minutes'].astype(int).astype(str) + ' min posibles en ' + hit['category'])
-    return hit.rename(columns={'participation_pct': 'value'})[
-        ['personid', 'displayname', 'category', 'value', 'detail']].assign(alert_key='low_participation')
+    return hit[['personid', 'displayname', 'category', 'value', 'detail']].assign(alert_key='low_participation')
 
 
 def _playing_up(ds: Dataset, season_year: int) -> pd.DataFrame:
@@ -149,6 +159,10 @@ def evaluate_alerts(ds: Dataset, cat_summary: pd.DataFrame, season_year: int,
     if not parts:
         return _empty().assign(alert='', color='')
     out = pd.concat(parts, ignore_index=True)
+    # Jugadores con planillas contradictorias: sus cifras están incompletas, no se evalúan (se avisan aparte).
+    out = out[~out['personid'].isin(ds.blocked_players(season_year)['personid'])]
+    if out.empty:
+        return _empty().assign(alert='', color='')
     out['alert'] = out['alert_key'].map(lambda k: alert_label(k, rules))
     out['color'] = out['alert_key'].map(lambda k: config[k]['color'])
     order = {a.key: i for i, a in enumerate(ALERT_DEFS)}

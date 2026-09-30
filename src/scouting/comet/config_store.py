@@ -133,6 +133,53 @@ def save_setting(key: str, value: Any, *, confirmed: bool = False) -> None:
             (key, Jsonb(clean), bool(confirmed), actor['id']))
 
 
+DELIVERY_MAX_ATTEMPTS = 3
+
+
+def clean_recipient(recipient) -> str:
+    text = str(recipient).strip().lower()
+    if len(text) > 254 or '@' not in text[1:] or ' ' in text:
+        raise ValueError('Destinatario no válido.')
+    return text
+
+
+# --- Registro de entregas del resumen semanal (solo el script operativo; sin sesión de usuario) -----------
+# Igual que `load_all_for_job`: la protección es la credencial privada. Las pantallas del portal no las
+# usan (lo verifica un test).
+
+def delivery_status_for_job(week_start: date, recipient: str):
+    """(estado, intentos) de una entrega, o None si nunca se reservó."""
+    with _db() as db:
+        row = db.execute('SELECT status, attempts FROM portal.comet_digest_deliveries WHERE week_start = %s AND recipient = %s',
+                         (week_start, clean_recipient(recipient))).fetchone()
+    return (row['status'], row['attempts']) if row else None
+
+
+def reserve_delivery_for_job(week_start: date, recipient: str, max_attempts: int = DELIVERY_MAX_ATTEMPTS) -> bool:
+    """Reserva atómica: True solo si ESTA ejecución debe enviar.
+
+    Inserta la reserva; si ya existía, solo la retoma cuando quedó «fallido» y quedan intentos. Dos procesos
+    a la vez no pueden reservar lo mismo (clave primaria + bloqueo de fila), y una reserva sin cerrar nunca se
+    retoma sola: si el proceso murió después de enviar, reenviar duplicaría el correo.
+    """
+    with _db() as db:
+        row = db.execute(
+            'INSERT INTO portal.comet_digest_deliveries AS d (week_start, recipient, status) VALUES (%s, %s, \'reservado\') '
+            'ON CONFLICT (week_start, recipient) DO UPDATE SET status = \'reservado\', attempts = d.attempts + 1, '
+            'last_error = \'\', updated_at = now() WHERE d.status = \'fallido\' AND d.attempts < %s RETURNING attempts',
+            (week_start, clean_recipient(recipient), int(max_attempts))).fetchone()
+    return row is not None
+
+
+def finish_delivery_for_job(week_start: date, recipient: str, *, sent: bool, error: str = '') -> None:
+    """Cierra una reserva: `enviado` o `fallido` (con el motivo, sin datos sensibles)."""
+    with _db() as db:
+        db.execute(
+            'UPDATE portal.comet_digest_deliveries SET status = %s, last_error = %s, updated_at = now(), '
+            'sent_at = CASE WHEN %s THEN now() ELSE sent_at END WHERE week_start = %s AND recipient = %s AND status = \'reservado\'',
+            ('enviado' if sent else 'fallido', (error or '')[:200], bool(sent), week_start, clean_recipient(recipient)))
+
+
 def set_mark(personid, mark: str, active: bool, note: str = '') -> None:
     """Marca o desmarca a un jugador como proyectado o de selección (no borra: desactiva)."""
     actor = require_admin()

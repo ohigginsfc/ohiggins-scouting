@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .categories import elapsed_years
 from .facts import Dataset, RESULT_DRAW, RESULT_LOSS, RESULT_WIN
 
 YOUNGER_BUCKETS = ['min_tope_o_mayor', 'min_menor_1', 'min_menor_2', 'min_menor_3', 'min_menor_4_o_mas']
@@ -19,8 +20,18 @@ def first_seen(ds: Dataset) -> pd.Series:
 
 
 def seniority_years(ds: Dataset, today) -> pd.Series:
-    """Años desde el primer partido registrado. Es un mínimo: no llega más atrás que el historial."""
-    return ((pd.Timestamp(today) - first_seen(ds)).dt.days / 365.25).round(2)
+    """Antigüedad en años según la regla `seniority_rule` (por jugador, indexada por personid).
+
+    `primer_partido`: desde el primer partido registrado (un mínimo: no llega más atrás que el historial).
+    `datefrom`: desde la fecha `datefrom` de la ficha; sin esa fecha la antigüedad queda sin dato, no se
+    sustituye por la otra fuente. Años por aniversario, no por división entre 365,25.
+    """
+    if ds.rules.value('seniority_rule') == 'datefrom':
+        start = ds.players.set_index('personid')['datefrom']
+    else:
+        start = first_seen(ds)
+    years = start.map(lambda day: elapsed_years(day, today))
+    return pd.to_numeric(years, errors='coerce').round(2)
 
 
 def _bucket(years_younger: pd.Series) -> pd.Series:
@@ -62,6 +73,7 @@ def category_indicators(ds: Dataset, cat_summary: pd.DataFrame, season_year: int
         people = cat_rows.drop_duplicates('personid')
         summary = cat_summary[(cat_summary['season_year'] == season_year) & (cat_summary['category'] == category)]
         possible = summary['possible_minutes'].sum(min_count=1)
+        counted = summary['counted_minutes'].sum(min_count=1)
         played = cat_rows[cat_rows['participated']]
         series = ds.matches[(ds.matches['season_year'] == season_year) & (ds.matches['category'] == category)
                             & ds.matches['matchid'].isin(cat_rows['matchid'])]
@@ -77,8 +89,8 @@ def category_indicators(ds: Dataset, cat_summary: pd.DataFrame, season_year: int
             edad_promedio=round(people['age'].mean(), 1) if people['age'].notna().any() else np.nan,
             antiguedad_promedio=round(people['personid'].map(seniority).mean(), 1),
             minutos_totales=played['minutes'].sum(min_count=1),
-            participacion_pct=round(summary['minutes'].sum(min_count=1) / possible * 100, 1)
-            if pd.notna(possible) and possible > 0 else np.nan,
+            participacion_pct=counted / possible * 100 if pd.notna(counted) and pd.notna(possible) and possible > 0 else np.nan,
+            filas_contradictorias=int(cat_rows['conflict'].sum()),
             goles=played['goals'].sum(min_count=1),
             amarillas=cat_rows['yellow_cards'].sum(min_count=1), rojas=cat_rows['red_cards'].sum(min_count=1),
             goles_recibidos_arqueros=conceded))
