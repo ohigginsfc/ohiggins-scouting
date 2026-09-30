@@ -13,8 +13,9 @@ import streamlit as st
 
 import comet_dashboard as comet
 from scouting.comet import alerts as alert_rules
-from scouting.comet import config_store, metrics, queries, quality
-from scouting.comet.facts import LOCAL_TZ, Dataset, build_dataset
+from scouting.comet import config_store, queries
+from scouting.comet.facts import LOCAL_TZ, Dataset
+from scouting.comet.pipeline import Computed, compute_all
 from scouting.comet.rules import Rules
 from scouting.portal.security import admin_only
 
@@ -26,16 +27,6 @@ EMPTY_PERIODS = pd.DataFrame(columns=['id', 'personid', 'kind', 'starts_on', 'en
 def now() -> pd.Timestamp:
     """Hora actual de Santiago. Las demostraciones y pruebas la sustituyen por una fecha fija."""
     return pd.Timestamp.now(tz=LOCAL_TZ).tz_localize(None)
-
-
-@dataclass(frozen=True)
-class Computed:
-    ds: Dataset
-    comp: pd.DataFrame        # una fila por jugador y competición
-    cat: pd.DataFrame         # una fila por jugador, temporada y categoría
-    principal: pd.DataFrame   # categoría principal de cada jugador y temporada
-    quality: pd.DataFrame
-    raw_counts: dict
 
 
 @dataclass(frozen=True)
@@ -81,12 +72,8 @@ def load_config() -> tuple[dict, pd.DataFrame, pd.DataFrame, Optional[str]]:
 @admin_only
 @st.cache_data(ttl=600, show_spinner='Calculando indicadores…')
 def compute(raw: dict, stored_rules: dict, periods: pd.DataFrame) -> Computed:
-    ds = build_dataset(raw['sheet'], raw['matches'], raw['players'], raw['goalkeepers'], Rules(stored_rules))
-    comp = metrics.add_percentages(metrics.player_competition_summary(ds, periods))
-    cat = metrics.category_summary(comp)
-    return Computed(ds=ds, comp=comp, cat=cat, principal=metrics.principal_categories(cat),
-                    quality=quality.data_quality(ds, raw['sheet'], raw['matches']),
-                    raw_counts={k: len(v) for k, v in raw.items()})
+    """Mismo cálculo que el resumen semanal (`scouting.comet.pipeline`), guardado en caché para las pantallas."""
+    return compute_all(raw, stored_rules, periods)
 
 
 @admin_only

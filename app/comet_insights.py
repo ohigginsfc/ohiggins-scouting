@@ -23,7 +23,9 @@ from ui.theme import OHIGGINS_BLUE, apply_ohiggins_plotly_theme
 THRESHOLD_RULES = {'yellow_cards': 'yellow_threshold', 'low_participation': 'participation_threshold',
                    'no_promotion': 'seasons_without_promotion'}
 QUALITY_COLORS = {'Correcto': 'Verde', 'Aviso': 'Naranja', 'Error': 'Rojo', 'Información': 'Azul'}
-CHOICE_LABELS = {'competicion': 'Por competición', 'temporada': 'Por temporada completa'}
+CHOICE_LABELS = {'competicion': 'Por competición', 'temporada': 'Por temporada completa',
+                 'registrada': 'Registrada (el minuto más largo jugado)', 'nominal': 'Nominal (duración reglamentaria)',
+                 'primer_partido': 'Primer partido registrado', 'datefrom': 'Fecha «datefrom» de la ficha'}
 WEEKDAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
 
@@ -62,7 +64,11 @@ def page_indicators() -> None:
             'category': ('Categoría', None), 'partidos': ('Partidos', FMT_INT), 'pct_victorias': ('% victorias de la serie', FMT_PCT),
             'jugadores_citados': ('Jugadores citados', FMT_INT), 'jugadores_con_minutos': ('Jugadores con minutos', FMT_INT),
             'edad_promedio': ('Edad promedio', FMT_1), 'antiguedad_promedio': ('Antigüedad promedio (años, mínimo)', FMT_1),
-            'participacion_pct': ('Participación (% de minutos posibles)', FMT_PCT), 'minutos_totales': ('Minutos totales de la serie', FMT_INT)})
+            'participacion_pct': ('Participación (% de minutos posibles)', FMT_PCT), 'minutos_totales': ('Minutos totales de la serie', FMT_INT),
+            'filas_contradictorias': ('Filas contradictorias', FMT_INT)})
+        if int(ind['filas_contradictorias'].sum()):
+            st.caption('Las filas contradictorias (repetidas con valores distintos) no se suman: los totales de esas series '
+                       'están incompletos. Detalle en Seguimiento y configuración → Calidad de datos.')
         horizon = quality.history_horizon(ds)
         if horizon['first'] is not None:
             st.caption(f'La antigüedad cuenta desde el primer partido registrado en COMET ({horizon["first"]:%d-%m-%Y}); '
@@ -187,6 +193,12 @@ def page_alerts() -> None:
     first_year = ds.seasons[0] if ds.seasons else None
     st.caption(f'El historial de COMET empieza en {first_year}: las temporadas sin promoción no pueden superar lo que ese '
                'historial permite ver.' if first_year else '')
+    blocked = ds.blocked_players(season)
+    if len(blocked):
+        with st.expander(f'{len(blocked)} jugador(es) no se evalúan por planillas contradictorias', expanded=False):
+            st.write('COMET trae filas repetidas con valores distintos para estos jugadores y partidos; no se elige ninguna. '
+                     'Sus cifras están incompletas, así que ninguna alerta los considera hasta que se aclare el dato.')
+            show_table(_named(blocked), {'displayname': ('Jugador', None), 'partidos': ('Partidos afectados', FMT_INT)})
     if found.empty:
         st.success('No hay alertas activas con la configuración actual.')
         return
@@ -296,9 +308,10 @@ def _rule_widget(ctx: Context, rule, disabled: bool):
         return st.selectbox(rule.label, list(rule.choices), index=list(rule.choices).index(current),
                             format_func=lambda v: CHOICE_LABELS.get(v, v), key=key, disabled=disabled,
                             label_visibility=hidden)
-    if rule.kind == 'list':
+    if rule.kind in ('list', 'words'):
+        placeholder = 'Un correo por línea' if rule.kind == 'list' else 'Un estado por línea (según matchstatus)'
         return [line.strip() for line in st.text_area(rule.label, value='\n'.join(current), height=90, key=key,
-                                                      placeholder='Un correo por línea', disabled=disabled,
+                                                      placeholder=placeholder, disabled=disabled,
                                                       label_visibility=hidden).splitlines() if line.strip()]
     if rule.editable:
         return st.text_input(rule.label, value=str(current), key=key, disabled=disabled, label_visibility=hidden)
@@ -422,7 +435,8 @@ def _tab_digest(ctx: Context) -> None:
     season = ds.current_season(week + timedelta(days=6)) or (ds.seasons[-1] if ds.seasons else None)
     found = alert_rules.evaluate_alerts(ds, ctx.computed.cat, season, ctx.alert_config) if season else pd.DataFrame(
         columns=['alert_key'])
-    digest = build_weekly_digest(ds, found, week.date(), generated_on=ctx.today.date(), pending_rules=len(ctx.rules.pending()))
+    digest = build_weekly_digest(ds, found, week.date(), generated_on=ctx.today.date(), pending_rules=len(ctx.rules.pending()),
+                                 blocked=len(ds.blocked_players(season)) if season else 0)
     a, b, c = st.columns(3)
     a.metric('Partidos en la semana', digest.matches)
     b.metric('Alertas vigentes', digest.alerts)
@@ -448,10 +462,20 @@ def _tab_quality(ctx: Context) -> None:
     if horizon['first'] is not None:
         st.caption(f'Datos disponibles desde {horizon["first"]:%d-%m-%Y} hasta {horizon["last"]:%d-%m-%Y} '
                    f'(temporadas {", ".join(str(s) for s in horizon["seasons"])}).')
-    st.markdown('**Datos que debería aportar el pipeline de COMET**')
-    st.caption('No se modifica dataProject desde este repositorio. Mientras tanto se usa la alternativa indicada.')
+    dups = ctx.ds.duplicates
+    if dups is not None and len(dups):
+        st.markdown('**Filas repetidas por jugador y partido**')
+        st.caption('Idénticas: se cuenta una sola. Contradictorias: no se elige ninguna; el jugador queda con cifras incompletas '
+                   'hasta que COMET indique cuál fila vale (identificadores tal como están en COMET).')
+        show_table(dups.sort_values(['resolucion', 'tabla']).head(200), {
+            'tabla': ('Tabla', None), 'matchid': ('Partido', None), 'personid': ('Jugador (id)', None),
+            'filas': ('Filas', FMT_INT), 'versiones': ('Versiones distintas', FMT_INT), 'resolucion': ('Resolución', None)})
+    st.markdown('**Datos de COMET: qué se usa, qué hay que confirmar y qué falta**')
+    st.caption('No se modifica dataProject ni se conceden permisos desde este repositorio. «Existe» significa que la columna '
+               'o tabla se comprobó en la lectura de COMET; un dato sin acceso no es un dato ausente.')
     show_static_table(pd.DataFrame(PIPELINE_DEPENDENCIES), {
-        'dato': ('Dato que falta', None), 'para': ('Para qué se necesita', None), 'hoy': ('Qué se hace hoy', None)})
+        'dato': ('Dato', None), 'estado': ('Estado', None), 'para': ('Para qué se necesita', None),
+        'hoy': ('Qué se hace hoy', None)})
 
 
 @admin_only

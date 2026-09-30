@@ -10,6 +10,7 @@ import streamlit as st
 
 from comet_context import Context, context, season_choices
 from scouting.comet import config_store, metrics
+from scouting.comet.categories import age_on
 from scouting.comet.facts import ROLE_STARTER, ROLE_SUB_IN, ROLE_SUB_OUT, ROLE_UNKNOWN
 from scouting.comet.digest import MONTHS, spanish_date
 from scouting.portal.security import admin_only
@@ -58,7 +59,8 @@ def _sheet_table(ctx: Context, rows: pd.DataFrame, match) -> None:
                        displayname=rows['displayname'].map(_label))
     show_table(rows, {
         'displayname': ('Jugador', None), 'age': ('Edad', FMT_INT), 'minutes': ('Minutos', FMT_INT),
-        'goals': ('Goles', FMT_INT), 'yellow_cards': ('Amarillas', FMT_INT), 'red_cards': ('Rojas', FMT_INT),
+        'goals': ('Goles', FMT_INT), 'own_goals': ('Autogoles', FMT_INT), 'yellow_cards': ('Amarillas', FMT_INT),
+        'second_yellows': ('2.ª amarilla', FMT_INT), 'red_cards': ('Rojas', FMT_INT),
         'resultado_en_cancha': ('Resultado con el jugador en cancha', None)})
 
 
@@ -75,6 +77,9 @@ def render_match(ctx: Context, matchid: str) -> None:
     if sheet.empty:
         st.info('COMET no trae la planilla de este partido.')
         return
+    if sheet['conflict'].any():
+        st.warning(f'{int(sheet["conflict"].sum())} jugador(es) tienen filas repetidas con valores distintos en este partido: '
+                   'no se elige ninguna y sus datos se muestran como «—» (rol «Sin dato»).')
     left, right = st.columns(2, gap='large')
     with left:
         st.markdown(f'**Titulares** ({int((sheet["role"] == ROLE_STARTER).sum())})')
@@ -192,6 +197,12 @@ def page_rankings() -> None:
     with c3:
         top = st.select_slider('Mostrar', options=[10, 20, 50, 'Todos'], value=20, key='cr_top')
     limit = None if top == 'Todos' else int(top)
+    excluded = metrics.incomplete_players(cat, category=category, season_year=season)
+    if len(excluded):
+        names = ', '.join(_label(n) for n in excluded['displayname'].head(8))
+        st.warning(f'{len(excluded)} jugador(es) no entran en los rankings porque COMET trae filas repetidas con valores '
+                   f'distintos en su planilla y no se elige ninguna: {names}{"…" if len(excluded) > 8 else ""}. '
+                   'Ver Seguimiento y configuración → Calidad de datos.')
     tabs = st.tabs(['Minutos jugados', 'Goles', 'Tarjetas', 'Partidos ganados con el jugador en cancha'])
 
     def board(metric: str, value: str, label: str, extra: dict, chart: bool = True) -> None:
@@ -321,9 +332,9 @@ def page_player() -> None:
 
     marks_active = ctx.marks[(ctx.marks['personid'] == personid) & ctx.marks['active'].astype(bool)]
     tags = ''.join(pill(config_store.MARKS[m], 'Verde' if m == 'seleccion' else 'Azul') + ' ' for m in marks_active['mark'])
-    born = getattr(profile, 'dateofbirth', pd.NaT)
+    born = getattr(profile, 'dateofbirth', pd.NaT)  # fecha civil (sin hora ni zona): ver facts.civil_date
     if pd.notna(born):
-        birth = f'Nacimiento {born:%d-%m-%Y} · {int((ctx.today - born).days // 365.25)} años'
+        birth = f'Nacimiento {born:%d-%m-%Y} · {age_on(born, ctx.today.date())} años'
     else:
         birth = 'Sin fecha de nacimiento'
     meta = ' · '.join([birth,
@@ -332,9 +343,18 @@ def page_player() -> None:
                        'estado ' + _label(getattr(profile, 'status', None), 'sin dato')])
     st.markdown(f'<div class="cm-match"><span class="score">{escape(name)}</span>{tags}'
                 f'<span class="meta">{escape(meta)}</span></div>', unsafe_allow_html=True)
+    since, height, weight = (getattr(profile, column, None) for column in ('datefrom', 'height', 'weight'))
+    st.caption('Ficha de COMET · ' + ' · '.join([
+        f'datefrom: {since:%d-%m-%Y}' if pd.notna(since) else 'datefrom: —',
+        f'estatura: {height:g}' if pd.notna(height) else 'estatura: —',
+        f'peso: {weight:g}' if pd.notna(weight) else 'peso: —']) + ' (estatura y peso tal como los entrega COMET, sin conversión).')
 
     comp = ctx.computed.comp[ctx.computed.comp['personid'] == personid]
     total = ctx.computed.cat[ctx.computed.cat['personid'] == personid]
+    if int(total['incomplete'].sum()):
+        st.warning(f'Las cifras de este jugador están **incompletas**: en {int(total["incomplete"].sum())} partido(s) COMET '
+                   'trae filas repetidas con valores distintos y no se elige ninguna. Esos valores aparecen como «—» y '
+                   'el jugador no entra en rankings ni alertas. Ver Seguimiento y configuración → Calidad de datos.')
     k = st.columns(6)
     k[0].metric('Partidos citado', int(total['cited'].sum()))
     k[1].metric('Partidos jugados', int(total['played'].sum()))
@@ -351,9 +371,11 @@ def page_player() -> None:
             'season_year': ('Temporada', '{:.0f}'), 'category': ('Categoría', None), 'competition': ('Competición', None),
             'cited': ('Citado', FMT_INT), 'started': ('Titular', FMT_INT), 'sub_in': ('Suplente que ingresó', FMT_INT),
             'only_called': ('Solo citación', FMT_INT), 'minutes': ('Minutos', FMT_INT), 'goals': ('Goles', FMT_INT),
-            'yellow_cards': ('Amarillas', FMT_INT), 'red_cards': ('Rojas', FMT_INT),
+            'yellow_cards': ('Amarillas', FMT_INT), 'second_yellows': ('2.ª amarilla', FMT_INT),
+            'red_cards': ('Rojas', FMT_INT), 'own_goals': ('Autogoles', FMT_INT),
             'possible_minutes': ('Minutos posibles', FMT_INT), 'participation_pct': ('Participación', FMT_PCT),
-            'wins_with': ('Ganados con él', FMT_INT), 'win_pct_with': ('% victorias', FMT_PCT)})
+            'wins_with': ('Ganados con él', FMT_INT), 'win_pct_with': ('% victorias', FMT_PCT),
+            'incomplete': ('Partidos con datos contradictorios', FMT_INT)})
     with tabs[1]:
         by_season = facts.groupby('season_year', as_index=False).agg(
             age=('age', 'first'), age_category=('age_category', 'first'),
