@@ -316,16 +316,46 @@ Git. Conservar `data/recovery/manual-2026` de forma privada entre ejecuciones.
 
 ```bash
 docker compose -f docker-compose.sync.yml build collector publisher
+docker compose -f docker-compose.sync.yml run --rm collector probe
 docker compose -f docker-compose.sync.yml run --rm collector collect
 docker compose -f docker-compose.sync.yml run --rm collector validate
 docker compose -f docker-compose.sync.yml run --rm publisher publish
 ```
 
+Ejecutar primero `probe`: hace **una única petición** al calendario 2026, sin
+visitar la portada, seguir redirecciones, descargar estadísticas, crear un
+checkpoint ni conectarse a la BD. `status: access_ok` con salida 0 confirma
+solamente el acceso a esa página; no significa que la temporada esté sincronizada.
+Si aparece `status: blocked` (salida 2), detenerse. No iniciar `collect` ni repetir
+pruebas en bucle. Un 429 incluye `retry_at`, que debe respetarse antes de volver
+a ejecutar. Otros fallos terminan con salida 1.
+
+El recolector y la recuperación HTTP usan el mismo transporte `curl_cffi`,
+fijado a la versión 0.16.3. El perfil `chrome` usa Chrome 150 en esa versión;
+sus cabeceras de versión/plataforma proceden del propio perfil, sin superponer
+el antiguo User-Agent de Windows/Chrome 131. La configuración de petición es
+de consulta API (`cors`, `empty`), sin la cabecera de navegación `Sec-Fetch-User`.
+Esto corrige inconsistencias, **no garantiza resolver un 403**. No se copian
+cookies del navegador ni se fija el valor observado de `X-Requested-With`:
+no se ha verificado su función ni su estabilidad. Para reproducir una prueba
+concreta se admite `probe --http-profile chrome131`; no hay rotación automática
+de perfiles ni cambio de IP ante un bloqueo.
+
 `collect` consulta el calendario completo de Chile 2026 (torneo `11653`, temporada
 `88493`), conserva partidos antiguos del checkpoint y descarga los nuevos,
 los que cambiaron de checksum y los últimos 14 días para revisar correcciones de
 estadísticas. Separa peticiones por al menos cinco segundos y limita cada
-invocación a 1.200 peticiones. El recolector no recibe credenciales de la BD.
+invocación a 1.200 peticiones y cuatro horas. Ambos límites se pueden reducir
+con `--max-requests` y `--seconds`. Los errores de red/5xx admiten como máximo
+dos reintentos con pausas de 30 y 120 segundos, dentro de esos límites;
+401/403/429 no se reintentan. El recolector no recibe credenciales de la BD.
+
+Para una actualización semanal con caché existente, limitar la ejecución a
+120 peticiones y 30 minutos:
+
+```bash
+docker compose -f docker-compose.sync.yml run --rm collector collect --max-requests 120 --seconds 1800
+```
 
 La primera ejecución sin checkpoint descarga la temporada completa. Para evitar
 repetir la descarga inicial, solicitar por un canal privado la carpeta raw 2026
