@@ -308,7 +308,7 @@ temporada completa de ese recolector.
 
 ### Sincronización manual de Chile 2026 hacia Supabase
 
-Para el administrador del servidor: [guía de actualización del worker y sincronización](docs/actualizacion-sofascore.txt).
+Para el administrador del servidor: [guía de actualización del worker y sincronización](docs/actualizacion-sofascore.md).
 
 Usar `docker-compose.sync.yml` desde el checkout local actualizado. El `.env`
 privado debe contener `SCOUTING_DATABASE_URL` del rol dedicado con
