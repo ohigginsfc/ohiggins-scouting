@@ -67,3 +67,75 @@ def test_guard_rejects_older_candidate():
     conn=MagicMock();conn.execute.return_value.fetchall.return_value=[(1,)]
     conn.execute.return_value.fetchone.return_value=(datetime(2099,1,1,tzinfo=timezone.utc),)
     with pytest.raises(ValueError,match='newer'):m.guard_existing(conn,candidate([event()]))
+
+
+@pytest.mark.parametrize('status', [401, 403, 429])
+def test_manual_http_stops_at_denial_without_fallback(status):
+    session = MagicMock()
+    session.get.return_value = MagicMock(status_code=status, text='denied',
+                                         headers={'Retry-After': '3600'})
+    client = m.Http(session=session)
+    with pytest.raises(m.r.ProviderBlocked) as failure:
+        client.fetch(m.r.scraper.BASE_URL + '/event/1/lineups')
+    assert failure.value.status == status
+    assert client.requests == session.get.call_count == 1
+    if status == 429:
+        assert datetime.fromisoformat(failure.value.retry_at) > datetime.now(timezone.utc)
+
+
+def test_probe_rejects_foreign_scope_and_missing_pagination():
+    bad = event()
+    bad['season']['id'] = 71131
+    with pytest.raises(ValueError, match='different season'):
+        m.probe(lambda _: {'events': [bad], 'hasNextPage': False})
+    with pytest.raises(ValueError, match='Invalid calendar'):
+        m.probe(lambda _: {'events': [event()]})
+    with pytest.raises(ValueError, match='Empty calendar'):
+        m.probe(lambda _: {'events': [], 'hasNextPage': False})
+
+
+@pytest.mark.parametrize('status, body, exit_code, outcome', [
+    (200, '{"events": [], "hasNextPage": false}', 1, 'stopped'),
+    (200, '<html>Not JSON</html>', 1, 'stopped'),
+    (403, '{"error": {"reason": "challenge"}}', 2, 'blocked'),
+    (429, '{}', 2, 'blocked'),
+    (503, '', 1, 'stopped'),
+    (302, '', 1, 'stopped'),
+])
+def test_probe_cli_never_retries_or_creates_checkpoint(
+    monkeypatch, tmp_path, capsys, status, body, exit_code, outcome
+):
+    import json
+    monkeypatch.syspath_prepend(str(m.r.ROOT / 'scripts'))
+    import manual_scouting_sync as cli
+    session = MagicMock()
+    session.get.return_value = MagicMock(status_code=status, text=body,
+                                         headers={'Retry-After': '3600'})
+    client = m.Http(session=session, budget=1)
+    monkeypatch.setattr(m, 'Http', lambda **_: client)
+    folder = tmp_path / 'must-not-exist'
+    assert cli.main(['probe', '--folder', str(folder)]) == exit_code
+    report = json.loads(capsys.readouterr().out)
+    assert report['status'] == outcome
+    assert report['requests'] == session.get.call_count == 1
+    assert not folder.exists()
+    session.close.assert_called_once()
+
+
+def test_probe_cli_valid_page_is_access_only(monkeypatch, tmp_path, capsys):
+    import json
+    monkeypatch.syspath_prepend(str(m.r.ROOT / 'scripts'))
+    import manual_scouting_sync as cli
+    session = MagicMock()
+    session.get.return_value = MagicMock(status_code=200, headers={}, text=json.dumps(
+        {'events': [event()], 'hasNextPage': True}))
+    client = m.Http(session=session, budget=1)
+    monkeypatch.setattr(m, 'Http', lambda **_: client)
+    folder = tmp_path / 'must-not-exist'
+    assert cli.main(['probe', '--folder', str(folder)]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report['status'] == 'access_ok'
+    assert report['calendar_complete'] is False
+    assert report['database_writes'] is False
+    assert report['calendar_events'] == report['requests'] == 1
+    assert not folder.exists()

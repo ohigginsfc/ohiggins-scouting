@@ -1,6 +1,6 @@
 """Database-free, bounded Sofascore collection and authenticated checkpoints.
 
-Only explicit browser requests are used. This module never imports DB settings.
+Explicit browser or HTTP transports share limits. This module never imports DB settings.
 """
 from __future__ import annotations
 
@@ -242,6 +242,7 @@ class BrowserTransport:
         if not (url == scraper.SOFASCORE_HOME if _homepage else url.startswith(scraper.BASE_URL + '/')):
             raise InvalidPackage('Unexpected provider origin')
         for attempt, backoff in enumerate((0, 30, 120)):
+            self._budget()  # Do not wait for a retry that the budget already forbids.
             if backoff:
                 if self.clock() + backoff >= self.deadline:
                     raise BudgetReached('Retry exceeds time budget')
@@ -290,17 +291,18 @@ class BrowserTransport:
 
 
 class HttpTransport(BrowserTransport):
-    """Original curl_cffi profile, with the recovery collector's shared limits."""
-    def __init__(self, *, session=None, **kwargs):
+    """Consistent curl_cffi profile, with the recovery collector's shared limits."""
+    def __init__(self, *, session=None, profile='chrome', **kwargs):
         super().__init__(None, **kwargs)
+        self.profile = profile
         if session is None:
             if scraper.curl_requests is None:
                 raise RuntimeError('curl_cffi is required for HTTP recovery')
-            session = scraper.curl_requests.Session(impersonate='chrome131')
+            session = scraper.curl_requests.Session(impersonate=profile)
         self.session = session
 
     def _request(self, url):
-        response = self.session.get(url, headers=scraper._http_headers(),
+        response = self.session.get(url, headers=scraper._http_headers(browser_defaults=True),
                                     timeout=25, allow_redirects=False)
         return {'status':response.status_code, 'body':response.text,
                 'retry':response.headers.get('Retry-After')}

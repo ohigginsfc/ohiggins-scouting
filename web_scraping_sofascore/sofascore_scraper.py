@@ -196,8 +196,8 @@ def get_fetch_context() -> FetchContext:
     return _FETCH_CTX
 
 
-def _http_headers() -> dict[str, str]:
-    return {
+def _http_headers(*, browser_defaults: bool = False) -> dict[str, str | None]:
+    headers: dict[str, str | None] = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -208,6 +208,19 @@ def _http_headers() -> dict[str, str]:
         "Referer": SOFASCORE_HOME,
         "Origin": "https://www.sofascore.com",
     }
+    if browser_defaults:
+        # curl_cffi supplies a matching User-Agent and client hints for its profile.
+        # Do not mix a hard-coded Windows/131 UA with that profile's defaults.
+        headers.pop("User-Agent")
+        headers.pop("Origin")  # Same-origin GET, as used by the website.
+        headers.update({
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            # curl_cffi uses None to remove a header; an empty string sends it empty.
+            "Sec-Fetch-User": None,
+        })
+    return headers
 
 
 def _is_json_text(raw: str) -> bool:

@@ -56,3 +56,4 @@ jobs:
         run: |
           docker compose -f docker-compose.recovery.yml build collector
           docker compose -f docker-compose.recovery.yml run --rm --entrypoint python collector scripts/test_selenium_runtime.py
+          docker compose -f docker-compose.recovery.yml run --rm --entrypoint python collector -m unittest tests.test_sofascore_http_headers -v

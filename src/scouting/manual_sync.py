@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import gzip
 import json
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -48,31 +47,36 @@ def validate(state):
     return pd.DataFrame(r.scraper.aggregate(raw, {}))
 
 
-class Http:
-    def __init__(self, budget=1200):
-        from curl_cffi import requests
-        self.session = requests.Session(impersonate='chrome131')
-        self.budget, self.count, self.last = budget, 0, 0.0
+class Http(r.HttpTransport):
+    def __init__(self, budget=1200, *, seconds=14400, profile='chrome', **kwargs):
+        super().__init__(max_requests=budget, seconds=seconds, profile=profile, **kwargs)
+
+    @property
+    def count(self):
+        return self.requests
 
     def fetch(self, url, **kwargs):
         # Optional player biography/statistics fallback is deliberately omitted.
         if '/player/' in url:
             return None
-        if self.count >= self.budget:
-            raise RuntimeError('Request budget exhausted; resume the same checkpoint')
-        time.sleep(max(0, 5 - (time.monotonic() - self.last)))
-        self.last = time.monotonic()
-        self.count += 1
-        response = self.session.get(url, headers=r.scraper._http_headers(), timeout=30)
-        if response.status_code != 200:
-            raise RuntimeError(f'Provider HTTP {response.status_code}; stop and diagnose before resuming')
-        value = response.json()
+        value = super().fetch(url, **kwargs)
         if not isinstance(value, dict) or 'error' in value:
             raise ValueError('Invalid provider response')
         return value
 
-    def close(self):
-        self.session.close()
+
+def probe(fetch):
+    """Validate one calendar page without creating a checkpoint or importing data."""
+    data = fetch(r.scraper.BASE_URL + f'/unique-tournament/11653/season/{SEASON_ID}/events/last/0')
+    if not isinstance(data.get('events'), list) or type(data.get('hasNextPage')) is not bool:
+        raise ValueError('Invalid calendar page')
+    for event in data['events']:
+        r.validate_event(event, {'season_id': SEASON_ID})
+    if not data['events']:
+        raise ValueError('Empty calendar page; access not verified')
+    return {'status': 'access_ok', 'season_id': SEASON_ID,
+            'calendar_events': len(data['events']), 'has_next_page': data['hasNextPage'],
+            'calendar_complete': False, 'database_writes': False}
 
 
 def collect(folder, fetch, *, resume=False, lookback_days=14):
