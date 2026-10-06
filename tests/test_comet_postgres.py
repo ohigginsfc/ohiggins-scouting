@@ -18,6 +18,7 @@ import streamlit as st
 from scouting.comet import alerts as alert_rules, config_store, metrics, queries
 from scouting.comet.facts import build_dataset
 from scouting.comet.ledger import PostgresLedger
+from scouting.comet.pipeline import compute_all
 from scouting.comet.rules import Rules
 from scouting.portal import accounts, security
 from tests import comet_tiny
@@ -214,6 +215,23 @@ def test_births_as_timestamptz_and_optional_columns_survive_the_real_database(co
     f = ds.facts.set_index(['matchid', 'personid'])
     assert f.loc[('3', '2'), 'second_yellows'] == 1 and f.loc[('3', '3'), 'own_goals'] == 1
     assert (f.loc[('1', '1'), ['second_yellows', 'own_goals']] == 0).all()
+
+
+def test_null_minutes_in_the_real_database_stay_unknown_from_the_query_to_the_screen_figures(comet_conn):
+    """Un NULL en `minutesplayed` de un jugador que jugó no se convierte en 0 ni en una suma parcial."""
+    conn, _ = comet_conn
+    conn.execute('UPDATE actuaciones_jugadores SET minutesplayed = NULL WHERE matchid = 2 AND personid = 1 AND clubid = %s', (CLUB,))
+    raw = queries.fetch_raw(_loader(conn))
+    assert pd.isna(raw['sheet'].set_index(['matchid', 'personid']).loc[(2, 1), 'minutesplayed']), 'PostgreSQL entrega el NULL'
+    computed = compute_all(raw)
+    p1 = computed.cat[(computed.cat['personid'] == '1') & (computed.cat['category'] == 'U-15')].iloc[0]
+    assert p1.played == 2 and p1.goals == 1 and p1.minutes_missing == 1
+    assert pd.isna(p1.minutes) and pd.isna(p1.counted_minutes) and pd.isna(p1.participation_pct)
+    assert list(computed.ds.minutes_gap_players(2026)['personid']) == ['1']
+    low = alert_rules.evaluate_alerts(computed.ds, computed.cat, 2026).query("alert_key == 'low_participation'")
+    assert '1' not in set(low['personid']) and '4' in set(low['personid'])
+    control = computed.quality.set_index('control').loc['Jugadores con minutos desconocidos']
+    assert control['nivel'] == 'Error' and control['cantidad'] == 1
 
 
 def test_columns_that_do_not_exist_arrive_as_missing_not_as_errors(comet_conn_base):

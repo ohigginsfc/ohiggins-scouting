@@ -72,8 +72,11 @@ def category_indicators(ds: Dataset, cat_summary: pd.DataFrame, season_year: int
             continue
         people = cat_rows.drop_duplicates('personid')
         summary = cat_summary[(cat_summary['season_year'] == season_year) & (cat_summary['category'] == category)]
-        possible = summary['possible_minutes'].sum(min_count=1)
-        counted = summary['counted_minutes'].sum(min_count=1)
+        # La participación de la serie usa solo a quienes tienen todos sus minutos conocidos, en el numerador y en
+        # el denominador: dejar fuera solo sus minutos jugados bajaría el porcentaje sin que nadie haya jugado menos.
+        unknown = summary['minutes_missing'].fillna(0) > 0
+        possible = summary.loc[~unknown, 'possible_minutes'].sum(min_count=1)
+        counted = summary.loc[~unknown, 'counted_minutes'].sum(min_count=1)
         played = cat_rows[cat_rows['participated']]
         series = ds.matches[(ds.matches['season_year'] == season_year) & (ds.matches['category'] == category)
                             & ds.matches['matchid'].isin(cat_rows['matchid'])]
@@ -91,6 +94,7 @@ def category_indicators(ds: Dataset, cat_summary: pd.DataFrame, season_year: int
             minutos_totales=played['minutes'].sum(min_count=1),
             participacion_pct=counted / possible * 100 if pd.notna(counted) and pd.notna(possible) and possible > 0 else np.nan,
             filas_contradictorias=int(cat_rows['conflict'].sum()),
+            jugadores_minutos_incompletos=int(unknown.sum()), actuaciones_sin_minutos=int(cat_rows['minutes_unknown'].sum()),
             goles=played['goals'].sum(min_count=1),
             amarillas=cat_rows['yellow_cards'].sum(min_count=1), rojas=cat_rows['red_cards'].sum(min_count=1),
             goles_recibidos_arqueros=conceded))

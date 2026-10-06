@@ -97,7 +97,8 @@ def run(argv=None, *, env=None, load_raw=None, stored=None, now=None, smtp_facto
     found = (alert_rules.evaluate_alerts(ds, computed.cat, season, (settings.get(alert_key) or {}).get('value'))
              if season else pd.DataFrame(columns=['alert_key']))
     digest = build_weekly_digest(ds, found, week_start, generated_on=today.date(), pending_rules=len(rules.pending()),
-                                 blocked=len(ds.blocked_players(season)) if season else 0)
+                                 blocked=len(ds.blocked_players(season)) if season else 0,
+                                 no_minutes=len(ds.minutes_gap_players(season)) if season else 0)
     if args.html_out:
         Path(args.html_out).write_text(digest.html, encoding='utf8')
         out(f'HTML guardado en {args.html_out}')

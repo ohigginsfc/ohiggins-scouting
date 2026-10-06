@@ -79,13 +79,22 @@ def data_quality(ds: Dataset, sheet_raw: pd.DataFrame, matches_raw: pd.DataFrame
     _check(rows, 'Jugadores sin fecha de nacimiento', int(f.loc[f['dateofbirth'].isna(), 'personid'].nunique()), WARNING,
            'Jugadores con planilla pero sin fecha de nacimiento.', 'No se calcula su edad ni si están adelantados.')
     _check(rows, 'Jugó y sin minutos', int((played_yes & minutes.isna()).sum()), ERROR,
-           'Marcados como que jugaron, pero sin minutos.', 'Sus minutos aparecen como "sin dato", no como 0.')
+           'Marcados como que jugaron, pero sin minutos.',
+           'Sus minutos y su participación aparecen como «—»: no se suma solo lo que sí figura.')
     _check(rows, 'Minutos sin marca de jugó', int((played_no & (minutes > 0)).sum()), ERROR,
-           'Tienen minutos, pero la fila dice que no jugaron.', 'Se ignoran esos minutos.')
+           'Tienen minutos, pero la fila dice que no jugaron.',
+           'La fuente se contradice: sus minutos quedan sin dato (no se usan ni se ignoran en silencio).')
     _check(rows, 'Titular que no jugó', int((started_yes & played_no).sum()), WARNING,
            'Titulares marcados como que no jugaron.', 'Se cuentan como titulares con 0 minutos.')
     _check(rows, 'Sin dato de titular o de jugó', int((sheet['startinglineup'].isna() | sheet['played'].isna()).sum()),
-           WARNING, 'Falta la marca de titular o de jugó.', 'Su rol aparece como "Sin dato".')
+           WARNING, 'Falta la marca de titular o de jugó.',
+           'Su rol aparece como "Sin dato"; si además faltan los minutos, no se supone que no jugó: quedan sin dato.')
+    _check(rows, 'Jugadores con minutos desconocidos', len(ds.minutes_gap_players()), ERROR,
+           'Jugadores con algún partido en que jugó (o no se sabe si jugó) y COMET no trae sus minutos, o en que la marca '
+           'de jugó contradice los minutos.',
+           'Sus minutos, su participación y sus minutos en categoría superior aparecen como «—» y no entran en el ranking '
+           'de minutos, en la alerta de baja participación ni en los indicadores de adelantados. No se determina su categoría '
+           'principal en esa temporada ni se prolonga una racha de promoción a través de ella. Sus goles y tarjetas sí cuentan.')
     _check(rows, 'Minutos fuera de rango', int(((minutes < 0) | (minutes > 130)).sum()),
            ERROR, 'Minutos negativos o mayores de 130.', 'Distorsionan minutos y duración del partido.')
 

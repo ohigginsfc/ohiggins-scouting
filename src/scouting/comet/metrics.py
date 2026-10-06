@@ -15,6 +15,31 @@ def _sum(series: pd.Series):
     return series.sum(min_count=1)  # NaN si todo falta; no se disfraza de 0
 
 
+def _strict_sum(series: pd.Series):
+    """Suma que no se afirma si falta algún sumando: un total con un dato desconocido es desconocido."""
+    return np.nan if series.isna().any() else series.sum(min_count=1)
+
+
+MINUTES_COLUMNS = ('minutes', 'ahead_minutes', 'counted_minutes')
+
+
+def blank_unknown_minutes(frame: pd.DataFrame) -> pd.DataFrame:
+    """Deja sin dato los totales de minutos de quien tiene algún partido sin minutos conocidos.
+
+    Una suma parcial (80 minutos de un jugador que jugó dos partidos) no es un total: se vería como si fuera
+    exacto, bajaría su participación y podría disparar la alerta de baja participación. Los minutos
+    *posibles* no dependen de este dato y se conservan.
+    """
+    if 'minutes_missing' not in frame:
+        return frame
+    gap = frame['minutes_missing'].fillna(0) > 0
+    frame = frame.copy()
+    for column in MINUTES_COLUMNS:
+        if column in frame:
+            frame.loc[gap, column] = np.nan
+    return frame
+
+
 def match_duration(ds: Dataset) -> pd.Series:
     """Duración de cada partido según la regla `duration_source`; sin el dato elegido, queda desconocida."""
     column = 'nominal_duration' if ds.rules.value('duration_source') == 'nominal' else 'duration'
@@ -90,10 +115,10 @@ def player_competition_summary(ds: Dataset, periods: Optional[pd.DataFrame] = No
         second_yellows=('second_yellows', _sum), own_goals=('own_goals', _sum),
         wins_with=('with_win', 'sum'), draws_with=('with_draw', 'sum'),
         losses_with=('with_loss', 'sum'), results_with=('with_result', 'sum'),
-        ahead_minutes=('ahead_minutes', _sum), incomplete=('conflict', 'sum'),
+        ahead_minutes=('ahead_minutes', _sum), incomplete=('conflict', 'sum'), minutes_missing=('minutes_unknown', 'sum'),
         first_call=('matchdate', 'min'), last_call=('matchdate', 'max'))
     out = out.merge(possible_minutes(ds, periods), on=keys, how='left')
-    return out
+    return blank_unknown_minutes(out)
 
 
 def _percentages(frame: pd.DataFrame) -> pd.DataFrame:
@@ -111,7 +136,7 @@ def add_percentages(comp_summary: pd.DataFrame) -> pd.DataFrame:
 
 
 _SUM_COLUMNS = ['cited', 'started', 'sub_in', 'only_called', 'played', 'wins_with', 'draws_with',
-                'losses_with', 'results_with', 'possible_matches', 'incomplete']
+                'losses_with', 'results_with', 'possible_matches', 'incomplete', 'minutes_missing']
 _NAN_SUM_COLUMNS = ['minutes', 'goals', 'yellow_cards', 'red_cards', 'second_yellows', 'own_goals',
                     'ahead_minutes', 'possible_minutes', 'counted_minutes']
 
@@ -124,12 +149,19 @@ def category_summary(comp_summary: pd.DataFrame) -> pd.DataFrame:
     agg.update(displayname=('displayname', 'first'), category_rank=('category_rank', 'first'),
                age=('age', 'first'), age_category=('age_category', 'first'),
                first_call=('first_call', 'min'), last_call=('last_call', 'max'))
-    return _percentages(comp_summary.groupby(keys, as_index=False).agg(**agg))
+    # Una competición con minutos desconocidos deja sin dato el total de la categoría: no se suma el resto.
+    return _percentages(blank_unknown_minutes(comp_summary.groupby(keys, as_index=False).agg(**agg)))
 
 
 def principal_categories(cat_summary: pd.DataFrame) -> pd.DataFrame:
     """Categoría de cada jugador en cada temporada: donde sumó más minutos (luego citaciones y rango)."""
-    ordered = cat_summary.assign(_minutes=cat_summary['minutes'].fillna(-1)).sort_values(
+    confirmed = cat_summary
+    if 'minutes_missing' in confirmed:
+        # No elegir otra categoría solo porque sus minutos sí se conocen. La temporada
+        # desconocida queda fuera del historial y corta cualquier racha de promoción.
+        gaps = confirmed.groupby(['personid', 'season_year'])['minutes_missing'].transform('sum').fillna(0) > 0
+        confirmed = confirmed[~gaps]
+    ordered = confirmed.assign(_minutes=confirmed['minutes'].fillna(-1)).sort_values(
         ['_minutes', 'cited', 'category_rank'], ascending=False)
     return ordered.groupby(['personid', 'season_year'], as_index=False).head(1).drop(columns='_minutes')
 
@@ -173,6 +205,15 @@ def incomplete_players(cat_summary: pd.DataFrame, *, category: str, season_year:
     return scope[scope['incomplete'] > 0][['personid', 'displayname', 'incomplete']]
 
 
+def minutes_gap_players(cat_summary: pd.DataFrame, *, category: str, season_year: int) -> pd.DataFrame:
+    """Jugadores de una categoría y temporada con partidos sin minutos conocidos.
+
+    No entran en el ranking de minutos (no se ordena por una suma parcial); en goles y tarjetas sí figuran.
+    """
+    scope = cat_summary[(cat_summary['category'] == category) & (cat_summary['season_year'] == season_year)]
+    return scope[scope['minutes_missing'] > 0][['personid', 'displayname', 'minutes_missing']]
+
+
 def ranking(cat_summary: pd.DataFrame, metric: str, *, category: str, season_year: int,
             top: Optional[int] = None, include_incomplete: bool = False) -> pd.DataFrame:
     """Ranking de una categoría y temporada. Empates comparten posición; sin datos o en 0 no entran.
@@ -212,8 +253,9 @@ def minutes_timeline(ds: Dataset, personid: str, freq: str = 'Mes') -> pd.DataFr
 
     calendar = calendar.assign(periodo=label(calendar['matchdate']))
     mine = f.assign(periodo=label(f['matchdate']))
+    # Un mes con un partido sin minutos conocidos no se dibuja como una suma parcial.
     played = mine.groupby(['periodo', 'category'], as_index=False).agg(
-        minutes=('minutes', _sum), played=('participated', 'sum'))
+        minutes=('minutes', _strict_sum), played=('participated', 'sum'))
     base = calendar.groupby(['periodo', 'category'], as_index=False).agg(matches=('matchid', 'nunique'))
     out = base.merge(played, on=['periodo', 'category'], how='left')
     out['minutes'] = out['minutes'].where(out['played'].notna(), 0.0)  # sin filas propias: no jugó

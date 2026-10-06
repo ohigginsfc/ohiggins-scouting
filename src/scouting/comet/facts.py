@@ -231,6 +231,15 @@ class Dataset:
                 .agg(displayname=('displayname', 'first'), partidos=('matchid', 'nunique'))
                 .sort_values('displayname').reset_index(drop=True))
 
+    def minutes_gap_players(self, season_year: int | None = None) -> pd.DataFrame:
+        """Jugadores con algún partido sin minutos conocidos: sus totales de minutos no se afirman."""
+        f = self.facts[self.facts['minutes_unknown']]
+        if season_year is not None:
+            f = f[f['season_year'] == season_year]
+        return (f.groupby('personid', as_index=False)
+                .agg(displayname=('displayname', 'first'), partidos=('matchid', 'nunique'))
+                .sort_values('displayname').reset_index(drop=True))
+
 
 def _role(started: pd.Series, played: pd.Series) -> pd.Series:
     is_starter = (started == True).fillna(False).astype(bool)  # noqa: E712 (NA-aware comparison)
@@ -240,6 +249,18 @@ def _role(started: pd.Series, played: pd.Series) -> pd.Series:
     return pd.Series(np.select(
         [is_starter, on_bench & did_play, on_bench & no_play],
         [ROLE_STARTER, ROLE_SUB_IN, ROLE_SUB_OUT], default=ROLE_UNKNOWN), index=started.index)
+
+
+def _minutes_unknown(played: pd.Series, minutes: pd.Series, participated: pd.Series) -> pd.Series:
+    """Filas en las que no se sabe cuántos minutos jugó el jugador.
+
+    * Jugó y COMET no trae sus minutos.
+    * No se sabe si jugó (sin marca de jugó) y tampoco hay minutos.
+    * La marca dice que no jugó pero trae minutos: la fuente se contradice, no se elige una versión.
+    """
+    played_no = (played == False).fillna(False).astype(bool)  # noqa: E712
+    no_minutes = minutes.isna()
+    return (participated & no_minutes) | (played.isna() & no_minutes) | (played_no & (minutes > 0))
 
 
 def build_dataset(sheet_raw, matches_raw, players_raw, goalkeepers_raw, rules: Rules | None = None) -> Dataset:
@@ -261,10 +282,14 @@ def build_dataset(sheet_raw, matches_raw, players_raw, goalkeepers_raw, rules: R
     minutes = f['minutesplayed']
     f['participated'] = ((f['played'] == True) | (f['played'].isna() & (minutes > 0))).fillna(False).astype(bool)  # noqa: E712
     f['role'] = _role(f['startinglineup'], f['played'])
-    # Quien no jugó tiene 0 minutos y 0 goles (es cierto); si jugó y falta el dato, queda NaN.
+    f['conflict'] = f['conflict'].astype(bool)
+    f['minutes_unknown'] = _minutes_unknown(f['played'], minutes, f['participated']) & ~f['conflict']
+    # Quien no jugó tiene 0 minutos y 0 goles (es cierto). Si no se sabe cuántos minutos jugó (jugó sin minutos,
+    # no se sabe si jugó, o la marca de jugó contradice los minutos) queda NaN: no es un 0 ni se ignora en silencio.
     # Una fila contradictoria tampoco es un 0: sus valores quedan ausentes.
-    f['minutes'] = minutes.where(f['participated'] | f['conflict'], 0.0)
-    f['goals'] = f['goals'].where(f['participated'] | f['conflict'], 0.0)
+    known_to_have_played = f['participated'] | f['conflict']
+    f['minutes'] = minutes.where(known_to_have_played, 0.0).where(~f['minutes_unknown'])
+    f['goals'] = f['goals'].where(known_to_have_played | f['minutes_unknown'], 0.0)
     f['goalkeeper'] = f['goalkeeper'].fillna(False).astype(bool)
 
     cutoff_month, cutoff_day = rules.cutoff()

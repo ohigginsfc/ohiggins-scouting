@@ -12,10 +12,14 @@ def _sum(series: pd.Series):
     return series.sum(min_count=1)
 
 
+def left_out_players(ds: Dataset, season_year: int) -> set:
+    """Quienes no entran en los indicadores de la temporada: una contradicción o un partido sin minutos conocidos
+    en cualquier categoría invalida las tasas comparativas (minutos arriba, permanencia, goles por 90...)."""
+    return set(ds.blocked_players(season_year)['personid']) | set(ds.minutes_gap_players(season_year)['personid'])
+
+
 def _complete_facts(ds: Dataset, season_year: int) -> pd.DataFrame:
-    """Una contradicción en cualquier categoría invalida las tasas comparativas de esa temporada."""
-    blocked = ds.blocked_players(season_year)['personid']
-    return ds.facts[(ds.facts['season_year'] == season_year) & ~ds.facts['personid'].isin(blocked)]
+    return ds.facts[(ds.facts['season_year'] == season_year) & ~ds.facts['personid'].isin(left_out_players(ds, season_year))]
 
 
 def ahead_players(ds: Dataset, season_year: int) -> pd.DataFrame:
@@ -107,7 +111,7 @@ def ahead_vs_peers(ds: Dataset, cat_summary: pd.DataFrame, season_year: int) -> 
     Con pocos jugadores la comparación es solo orientativa: la columna `jugadores` lo muestra.
     """
     cs = cat_summary[(cat_summary['season_year'] == season_year) & (cat_summary['played'] > 0)
-                     & ~cat_summary['personid'].isin(ds.blocked_players(season_year)['personid'])].copy()
+                     & ~cat_summary['personid'].isin(left_out_players(ds, season_year))].copy()
     cs['steps'] = [steps_ahead(c, a, ds.categories) for c, a in zip(cs['category'], cs['age_category'])]
     cs['steps'] = pd.to_numeric(cs['steps'], errors='coerce')
     cs['group'] = np.select([cs['steps'] > 0, cs['steps'] == 0], ['Adelantados', 'Grupo de edad'], default='')
