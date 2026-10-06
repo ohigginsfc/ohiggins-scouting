@@ -35,7 +35,7 @@ PAGE_SUBTITLES: dict[str, str] = {
     "Nuevo informe": "Registra una evaluación de un jugador.",
     "Consultar jugador": "Explora informes, atributos y estadísticas.",
     "Comparación": "Compara perfiles entre jugadores y temporadas.",
-    "Informes ocultos": "Restaura o elimina informes ocultos.",
+    "Informes ocultos": "Consulta informes ocultos.",
     "Datos objetivos": "Explora estadísticas por temporada.",
     "Matching": "Herramientas de vinculación (modo depuración).",
     "Administración": "Mantenimiento e información técnica.",
