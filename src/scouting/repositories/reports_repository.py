@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from psycopg import Connection
+from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
 
@@ -187,6 +188,29 @@ def delete_duplicate_reports_same_key(
         deleted = cur.rowcount if cur.rowcount is not None else 0
         conn.commit()
         return int(deleted)
+
+
+def update_report_fields(conn: Connection, report_id: int, **fields: Any) -> None:
+    """Update only explicitly supplied fields, preserving metadata and ownership."""
+    allowed = {
+        'source_type', 'source_name', 'scout_name', 'report_date', 'competition',
+        'match_observed', 'position_observed', 'minutes_observed', 'summary',
+        'strengths', 'weaknesses', 'recommendation', 'rating', 'video_url',
+        'alternative_positions', 'raw_payload',
+    }
+    if fields.keys() - allowed:
+        raise ValueError('Campos de informe no válidos.')
+    if not fields:
+        return
+    assignments = sql.SQL(', ').join(
+        sql.SQL('{} = %s').format(sql.Identifier(name)) for name in fields
+    )
+    values = [Json(value) if name == 'raw_payload' and value is not None else value
+              for name, value in fields.items()]
+    with conn.cursor() as cur:
+        cur.execute(sql.SQL('UPDATE scouting_reports SET {} WHERE id = %s').format(assignments),
+                    (*values, report_id))
+    conn.commit()
 
 
 def update_report(

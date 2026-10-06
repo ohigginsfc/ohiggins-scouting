@@ -779,11 +779,10 @@ def _render_visible_reports_management(reports: list[dict[str, Any]]) -> None:
 
 def _render_hidden_reports_page() -> None:
     _dashboard_flash_pop()
-    can_manage = True
     if os.environ.get('PORTAL_MODE') == '1':
         from scouting.portal.security import require_user
-        can_manage = require_user()['role'] == 'admin'
-    st.caption("Restaura informes ocultos o elimínalos de forma permanente." if can_manage else "Consulta de informes ocultos.")
+        require_user()
+    st.caption("Edita, restaura o elimina informes ocultos.")
 
     with get_connection() as conn:
         hidden = fetch_hidden_reports(conn, limit=200)
@@ -852,8 +851,27 @@ def _render_hidden_reports_page() -> None:
         st.dataframe(pd.DataFrame(ratings)[['attribute_group', 'attribute_name', 'rating', 'max_rating', 'notes']],
                      use_container_width=True, hide_index=True)
 
-    if not can_manage:
-        return
+    with st.form(f'hidden_edit_report_{report_id}'):
+        current_rec = report.get('recommendation')
+        rec_index = list(RECOMMENDATION_OPTIONS).index(current_rec) if current_rec in RECOMMENDATION_OPTIONS else None
+        edited_rec = st.selectbox('Recomendación', list(RECOMMENDATION_OPTIONS), index=rec_index,
+                                  key=f'hidden_edit_rec_{report_id}')
+        edited_text = {
+            field: st.text_area(label, value=report.get(field) or '', key=f'hidden_edit_{report_id}_{field}')
+            for field, label in [('summary', 'Resumen'), ('strengths', 'Fortalezas'), ('weaknesses', 'Aspectos a mejorar')]
+        }
+        save = st.form_submit_button('Guardar cambios', type='primary')
+    if save:
+        try:
+            fields = dict(edited_text)
+            if edited_rec is not None:
+                fields['recommendation'] = edited_rec
+            with get_connection() as conn:
+                update_report(conn, report_id, **fields)
+            st.session_state['dashboard_flash_success'] = f'Informe de {player_name} actualizado.'
+            st.rerun()
+        except Exception as exc:  # noqa: BLE001
+            st.error(f'No se pudo guardar: {exc}')
 
     r1, r2 = st.columns([1, 1.4])
     if r1.button(labeled("restore", "Restaurar"), type="secondary", key="hidden_restore_report"):

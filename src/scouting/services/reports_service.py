@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import date, datetime
-from scouting.portal.security import require_admin, require_user, require_report_owner
+from scouting.portal.security import require_admin, require_user, require_report_owner, require_report_management
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -62,20 +62,20 @@ def update_report_recommendation(conn: Connection, report_id: int, recommendatio
 
 def hide_report(conn: Connection, report_id: int, hidden_by: str | None = None) -> None:
     if os.environ.get('PORTAL_MODE') == '1':
-        require_admin()
+        require_report_management(conn, report_id)
     reports_repository.hide_report(conn, report_id, hidden_by=hidden_by)
 
 
 def restore_report(conn: Connection, report_id: int) -> None:
     if os.environ.get('PORTAL_MODE') == '1':
-        require_admin()
+        require_report_management(conn, report_id)
     reports_repository.restore_report(conn, report_id)
 
 
 def delete_report_permanently(conn: Connection, report_id: int) -> bool:
-    """Delete a report; unified portal reserves this operation for admins."""
+    """Admin may delete any report; scout may delete currently hidden reports."""
     if os.environ.get('PORTAL_MODE') == '1':
-        require_admin()
+        require_report_management(conn, report_id)
     return reports_repository.delete_report_permanently(conn, report_id)
 
 
@@ -106,7 +106,7 @@ def update_report(conn: Connection, report_id: int, **fields: Any) -> None:
         fields["recommendation"] = value
     if os.environ.get('PORTAL_MODE') == '1' and 'raw_payload' in fields:
         raise ValueError('No se puede cambiar la propiedad del informe.')
-    reports_repository.update_report(conn, report_id, **fields)
+    reports_repository.update_report_fields(conn, report_id, **fields)
 
 
 def _to_date(value: Any) -> date | None:

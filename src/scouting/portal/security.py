@@ -43,14 +43,25 @@ def admin_only(fn):
 
 def can_edit(report):
     user = require_user()
-    return user['role'] == 'admin' or (
-        not report.get('is_hidden') and
-        (report.get('raw_payload') or {}).get('portal_owner_id') == user['id'])
+    return user['role'] == 'admin' or (user['role'] == 'scout' and (
+        report.get('is_hidden') or
+        (report.get('raw_payload') or {}).get('portal_owner_id') == user['id']))
+
+
+def require_report_management(conn, report_id):
+    """Admin manages all reports; scout may manage any currently hidden report."""
+    user = require_user()
+    if user['role'] == 'admin':
+        return
+    from scouting.repositories.reports_repository import get_report_by_id
+    report = get_report_by_id(conn, report_id)
+    if user['role'] != 'scout' or not report or not report.get('is_hidden'):
+        raise PermissionError('Scout solo puede restaurar o eliminar informes ocultos.')
 
 
 def require_report_owner(conn, report_id):
     from scouting.repositories.reports_repository import get_report_by_id
     report = get_report_by_id(conn, report_id)
     if not report or not can_edit(report):
-        raise PermissionError('Solo puedes modificar tus propios informes visibles.')
+        raise PermissionError('Solo puedes modificar tus informes visibles o los informes ocultos.')
     return report
