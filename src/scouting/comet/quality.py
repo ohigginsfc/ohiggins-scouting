@@ -93,7 +93,8 @@ def data_quality(ds: Dataset, sheet_raw: pd.DataFrame, matches_raw: pd.DataFrame
            'Jugadores con algún partido en que jugó (o no se sabe si jugó) y COMET no trae sus minutos, o en que la marca '
            'de jugó contradice los minutos.',
            'Sus minutos, su participación y sus minutos en categoría superior aparecen como «—» y no entran en el ranking '
-           'de minutos, en la alerta de baja participación ni en los indicadores de adelantados. Sus goles y tarjetas sí cuentan.')
+           'de minutos, en la alerta de baja participación ni en los indicadores de adelantados. No se determina su categoría '
+           'principal en esa temporada ni se prolonga una racha de promoción a través de ella. Sus goles y tarjetas sí cuentan.')
     _check(rows, 'Minutos fuera de rango', int(((minutes < 0) | (minutes > 130)).sum()),
            ERROR, 'Minutos negativos o mayores de 130.', 'Distorsionan minutos y duración del partido.')
 

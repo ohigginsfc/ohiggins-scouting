@@ -115,15 +115,17 @@ def _low_participation(cat_summary: pd.DataFrame, season_year: int, threshold: i
 
 
 def _playing_up(ds: Dataset, season_year: int) -> pd.DataFrame:
-    f = ds.facts[(ds.facts['season_year'] == season_year) & (ds.facts['steps_ahead'] > 0) & ds.facts['participated']]
+    ahead = ds.facts[(ds.facts['season_year'] == season_year) & (ds.facts['steps_ahead'] > 0)]
+    # Detectar también la participación desconocida o contradictoria, antes de
+    # filtrar los partidos en que sí consta que jugó. Esas filas afectan al total.
+    incomplete = ahead.groupby('personid')['minutes_unknown'].any()
+    f = ahead[ahead['participated']]
     if f.empty:
         return _empty()
     per_category = f.groupby(['personid', 'category'], as_index=False).agg(
         displayname=('displayname', 'first'), age=('age', 'first'), age_category=('age_category', 'first'),
-        steps=('steps_ahead', 'max'), minutes=('minutes', lambda s: s.sum(min_count=1)),
-        unknown=('minutes_unknown', 'sum'))
+        steps=('steps_ahead', 'max'), minutes=('minutes', lambda s: s.sum(min_count=1)))
     total = per_category.groupby('personid')['minutes'].sum(min_count=1)
-    incomplete = per_category.groupby('personid')['unknown'].sum() > 0
     top = per_category.sort_values(['minutes', 'steps'], ascending=False).groupby('personid', as_index=False).head(1)
     # Con algún partido sin minutos conocidos no se cita una suma parcial: el aviso de que juega arriba sigue.
     top = top.assign(value=top['personid'].map(total).where(~top['personid'].map(incomplete)))

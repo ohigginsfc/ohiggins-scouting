@@ -243,6 +243,7 @@ Las filas repetidas contradictorias siguen su propia política (ver arriba) y no
 | Ranking de minutos | No entra y se lista en un aviso; en goles, tarjetas y partidos ganados sí figura |
 | Alerta «menos del 20 %» | No se evalúa (en ninguna categoría de la temporada: sin minutos no se sabe cuál es su categoría principal) y se lista en la pantalla de alertas |
 | Alerta «juega en categoría superior» | Sigue vigente; el detalle dice «minutos incompletos» en vez de citar una suma parcial |
+| Categoría principal y alerta «sin promoción» | Una temporada con minutos desconocidos queda sin categoría principal; no se elige otra por tener datos completos y el hueco interrumpe la racha |
 | Participación de la serie (indicadores) | Se calcula sin él en numerador **y** denominador; los minutos totales de la serie avisan cuántas actuaciones quedaron fuera |
 | Jugadores adelantados | Quedan fuera de los indicadores basados en minutos (minutos arriba, permanencia, comparación) y se avisa cuántos son |
 | Resumen semanal (pantalla y correo) | Las mismas alertas, más una nota con cuántos jugadores no se evalúan en la de participación |
@@ -258,6 +259,10 @@ Las filas repetidas contradictorias siguen su propia política (ver arriba) y no
 | Si P1 jugó los 3 partidos y solo se conocen 10 minutos | Alerta «4,16 % · 10 de 240 min posibles» | Sin alerta; P1 figura como jugador sin minutos completos |
 
 Pruebas: `tests/test_comet_unknown_minutes.py` (cálculos y pantallas) y una prueba con un `NULL` real en `tests/test_comet_postgres.py`.
+`tests/test_comet_minutes_alert_regressions.py` cubre además la categoría principal desconocida en la temporada actual o histórica,
+la conservación de una racha con datos completos y las filas con participación desconocida o contradictoria en la alerta de categoría superior.
+Esta alerta se mantiene cuando hay otros partidos con participación confirmada; sus minutos se marcan como incompletos.
+Un dato ausente en la categoría propia no invalida los minutos completos y conocidos en las superiores.
 **No se pudo comprobar con datos reales ni en la web:** se ignora cuántas veces ocurre esto en COMET. El control de calidad lo cuenta; si es 0, esta corrección no cambia ninguna cifra.
 
 ### Hallazgos de esta revisión que NO se corrigieron

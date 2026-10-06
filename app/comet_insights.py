@@ -215,7 +215,8 @@ def page_alerts() -> None:
         with st.expander(f'{len(no_minutes)} jugador(es) sin minutos completos: no se evalúa su participación', expanded=False):
             st.write('COMET no trae los minutos de algún partido en que estos jugadores jugaron (o la marca de jugó contradice '
                      'los minutos). La alerta de baja participación no se calcula con una suma parcial; las demás alertas '
-                     'siguen vigentes para ellos.')
+                     'basadas en tarjetas y participación confirmada en categorías superiores siguen evaluándose. '
+                     'La categoría principal y la racha sin promoción no se infieren de minutos incompletos.')
             show_table(_named(no_minutes), {'displayname': ('Jugador', None), 'partidos': ('Partidos sin minutos', FMT_INT)})
     if found.empty:
         st.success('No hay alertas activas con la configuración actual.')

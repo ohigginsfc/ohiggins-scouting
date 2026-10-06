@@ -155,7 +155,13 @@ def category_summary(comp_summary: pd.DataFrame) -> pd.DataFrame:
 
 def principal_categories(cat_summary: pd.DataFrame) -> pd.DataFrame:
     """Categoría de cada jugador en cada temporada: donde sumó más minutos (luego citaciones y rango)."""
-    ordered = cat_summary.assign(_minutes=cat_summary['minutes'].fillna(-1)).sort_values(
+    confirmed = cat_summary
+    if 'minutes_missing' in confirmed:
+        # No elegir otra categoría solo porque sus minutos sí se conocen. La temporada
+        # desconocida queda fuera del historial y corta cualquier racha de promoción.
+        gaps = confirmed.groupby(['personid', 'season_year'])['minutes_missing'].transform('sum').fillna(0) > 0
+        confirmed = confirmed[~gaps]
+    ordered = confirmed.assign(_minutes=confirmed['minutes'].fillna(-1)).sort_values(
         ['_minutes', 'cited', 'category_rank'], ascending=False)
     return ordered.groupby(['personid', 'season_year'], as_index=False).head(1).drop(columns='_minutes')
 
