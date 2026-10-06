@@ -17,17 +17,19 @@ guarda contraseñas y no debe exponerse en la Data API. Los esquemas `public`
 | Seguimiento deportivo COMET (partido semanal, rankings, ficha, indicadores, alertas, adelantados) | Sí | No |
 | Configurar reglas y alertas COMET; marcar jugadores proyectados o de selección y sus períodos | Sí | No |
 | Scouting visible, estadísticas y comparaciones | Sí | Sí |
-| Consultar informes ocultos y sus valoraciones | Sí | Sí, solo lectura |
+| Consultar informes ocultos y sus valoraciones | Sí | Sí |
 | Crear informes | Sí | Sí |
-| Editar evaluación y recomendación | Todos | Solo propios visibles |
-| Ocultar, restaurar o eliminar informes | Sí | No |
+| Editar evaluación y recomendación | Todos | Propios visibles y todos los ocultos |
+| Restaurar o eliminar informes ocultos | Sí | Sí |
+| Ocultar o eliminar informes visibles | Sí | No |
 | Asignar propietario a informes migrados | Sí | No |
 | Gestionar cuentas y roles | Sí | No |
 | Lanzar sincronizaciones desde el portal | No; usar procesos operativos | No |
 
 El autor se fija desde la identidad autenticada y se conserva en
 `raw_payload.portal_owner_id`. Los informes migrados sin ese identificador se
-pueden consultar, pero solo el admin puede editarlos. No se asigna propiedad por
+pueden consultar; si están visibles, solo el admin puede editarlos. Los ocultos
+pueden ser gestionados por ambos roles. No se asigna propiedad por
 coincidencia de nombre. Administración permite asignarla explícitamente a una
 cuenta activa, conservando el contenido y registrando quién y cuándo la asignó.
 
@@ -40,9 +42,11 @@ lector: conceder SELECT sin una política RLS puede devolver cero filas aunque
 las tablas tengan datos. Validar conteos no vacíos al configurar COMET.
 
 El contador y la sección **Informes ocultos** están disponibles para ambos roles.
-Scout puede consultar su contenido y valoraciones, pero no editarlos, restaurarlos
-ni eliminarlos, incluso cuando es autor del informe. Estas restricciones se
-comprueban también en los servicios; no requieren cambios de permisos de la BD.
+Scout puede consultar, editar, restaurar y eliminar cualquier informe oculto,
+incluidos los migrados o creados por otros scouts. El borrado requiere confirmación.
+Al restaurarlo, se vuelven a aplicar los permisos habituales de los informes visibles:
+scout solo edita los propios y no puede ocultarlos ni eliminarlos. La propiedad se
+conserva al editar. Los permisos se comprueban en los servicios y no requieren una migración.
 
 Cada sesión se valida contra Supabase Auth y el perfil privado en cada ejecución
 de Streamlit. Cambiar rol/estado/contraseña desde el portal revoca las sesiones del

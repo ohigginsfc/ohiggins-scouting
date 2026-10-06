@@ -45,7 +45,8 @@ def test_owner_is_not_a_name_and_legacy_is_admin_only():
         assert security.can_edit({'raw_payload': {'portal_owner_id': SCOUT['id']}})
         assert not security.can_edit({'scout_name': 'Scout', 'raw_payload': None})
         assert not security.can_edit({'raw_payload': {'portal_owner_id': ADMIN['id']}})
-        assert not security.can_edit({'raw_payload': {'portal_owner_id': SCOUT['id']}, 'is_hidden': True})
+        assert security.can_edit({'raw_payload': {'portal_owner_id': SCOUT['id']}, 'is_hidden': True})
+        assert security.can_edit({'raw_payload': None, 'is_hidden': True})
     with security.session_scope({}, verified_user=ADMIN):
         assert security.can_edit({'raw_payload': None})
 
