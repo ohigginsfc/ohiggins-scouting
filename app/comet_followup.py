@@ -203,6 +203,7 @@ def page_rankings() -> None:
         st.warning(f'{len(excluded)} jugador(es) no entran en los rankings porque COMET trae filas repetidas con valores '
                    f'distintos en su planilla y no se elige ninguna: {names}{"…" if len(excluded) > 8 else ""}. '
                    'Ver Seguimiento y configuración → Calidad de datos.')
+    no_minutes = metrics.minutes_gap_players(cat, category=category, season_year=season)
     tabs = st.tabs(['Minutos jugados', 'Goles', 'Tarjetas', 'Partidos ganados con el jugador en cancha'])
 
     def board(metric: str, value: str, label: str, extra: dict, chart: bool = True) -> None:
@@ -219,6 +220,12 @@ def page_rankings() -> None:
             _bar(ranked, value, label)
 
     with tabs[0]:
+        if len(no_minutes):
+            names = ', '.join(_label(n) for n in no_minutes['displayname'].head(8))
+            st.warning(f'{len(no_minutes)} jugador(es) no entran en el ranking de minutos porque COMET no trae los minutos de '
+                       f'algún partido en que jugaron: {names}{"…" if len(no_minutes) > 8 else ""}. Sus minutos se ven como «—»: '
+                       'no se ordena a nadie por una suma parcial. Sus goles y tarjetas sí cuentan en los otros rankings. '
+                       'Ver Seguimiento y configuración → Calidad de datos.')
         board('Minutos jugados', 'minutes', 'Minutos',
               {'started': ('Titular', FMT_INT), 'sub_in': ('Ingresó', FMT_INT), 'participation_pct': ('Participación', FMT_PCT)})
     with tabs[1]:
@@ -355,10 +362,16 @@ def page_player() -> None:
         st.warning(f'Las cifras de este jugador están **incompletas**: en {int(total["incomplete"].sum())} partido(s) COMET '
                    'trae filas repetidas con valores distintos y no se elige ninguna. Esos valores aparecen como «—» y '
                    'el jugador no entra en rankings ni alertas. Ver Seguimiento y configuración → Calidad de datos.')
+    no_minutes = int(total['minutes_missing'].sum())
+    if no_minutes:
+        st.warning(f'En {no_minutes} partido(s) COMET no trae los minutos de este jugador (o la marca de jugó los contradice): '
+                   'sus minutos y su participación aparecen como «—» —no se muestra una suma parcial— y no entra en el ranking '
+                   'de minutos ni en la alerta de baja participación. Sus goles y tarjetas sí cuentan. '
+                   'Ver Seguimiento y configuración → Calidad de datos.')
     k = st.columns(6)
     k[0].metric('Partidos citado', int(total['cited'].sum()))
     k[1].metric('Partidos jugados', int(total['played'].sum()))
-    k[2].metric('Minutos', fmt(total['minutes'].sum(min_count=1)))
+    k[2].metric('Minutos', fmt(total['minutes'].sum(skipna=False) if len(total) else None))
     k[3].metric('Goles', fmt(total['goals'].sum(min_count=1)))
     k[4].metric('Amarillas / rojas', f'{fmt(total["yellow_cards"].sum(min_count=1))} / {fmt(total["red_cards"].sum(min_count=1))}')
     results = total['results_with'].sum()
@@ -410,7 +423,7 @@ def page_player() -> None:
                                        font=dict(color='#1B6B34', size=11), bgcolor='#DCFCE7')
             st.plotly_chart(fig, use_container_width=True)
             st.caption('Solo se muestran los períodos en que O’Higgins jugó en las categorías donde el jugador fue citado; '
-                       'un mes sin partidos no se dibuja como cero.')
+                       'un mes sin partidos no se dibuja como cero, y un mes con minutos desconocidos no se dibuja como una suma parcial.')
     with tabs[3]:
         log = facts.sort_values('matchdate', ascending=False).assign(
             fecha=lambda d: d['matchdate'].dt.strftime('%d-%m-%Y'),

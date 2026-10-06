@@ -96,6 +96,11 @@ def _pct_text(value: float) -> str:
 
 def _low_participation(cat_summary: pd.DataFrame, season_year: int, threshold: int) -> pd.DataFrame:
     season = cat_summary[cat_summary['season_year'] == season_year]
+    if 'minutes_missing' in season:
+        # Con un partido sin minutos conocidos no se sabe cuál es su categoría principal (se elige por minutos)
+        # ni cuánto jugó: no se evalúa, en ninguna categoría de la temporada.
+        gaps = season.groupby('personid')['minutes_missing'].transform('sum').fillna(0) > 0
+        season = season[~gaps]
     principal = principal_categories(season) if len(season) else season
     hit = principal[principal['possible_minutes'].fillna(0) > 0]
     # Comparación exacta (minutos × 100 frente a umbral × posibles): nada se redondea antes de comparar.
@@ -110,7 +115,11 @@ def _low_participation(cat_summary: pd.DataFrame, season_year: int, threshold: i
 
 
 def _playing_up(ds: Dataset, season_year: int) -> pd.DataFrame:
-    f = ds.facts[(ds.facts['season_year'] == season_year) & (ds.facts['steps_ahead'] > 0) & ds.facts['participated']]
+    ahead = ds.facts[(ds.facts['season_year'] == season_year) & (ds.facts['steps_ahead'] > 0)]
+    # Detectar también la participación desconocida o contradictoria, antes de
+    # filtrar los partidos en que sí consta que jugó. Esas filas afectan al total.
+    incomplete = ahead.groupby('personid')['minutes_unknown'].any()
+    f = ahead[ahead['participated']]
     if f.empty:
         return _empty()
     per_category = f.groupby(['personid', 'category'], as_index=False).agg(
@@ -118,10 +127,12 @@ def _playing_up(ds: Dataset, season_year: int) -> pd.DataFrame:
         steps=('steps_ahead', 'max'), minutes=('minutes', lambda s: s.sum(min_count=1)))
     total = per_category.groupby('personid')['minutes'].sum(min_count=1)
     top = per_category.sort_values(['minutes', 'steps'], ascending=False).groupby('personid', as_index=False).head(1)
-    top = top.assign(value=top['personid'].map(total))
+    # Con algún partido sin minutos conocidos no se cita una suma parcial: el aviso de que juega arriba sigue.
+    top = top.assign(value=top['personid'].map(total).where(~top['personid'].map(incomplete)))
+    minutes_text = top['value'].map(lambda v: 'minutos incompletos' if pd.isna(v) else f'{int(v)} min')
     top['detail'] = ('Le corresponde ' + top['age_category'] + ' por edad (' + top['age'].astype(int).astype(str)
                      + ' años) · juega en ' + top['category'] + ' (+' + top['steps'].astype(int).astype(str)
-                     + ') · ' + top['value'].fillna(0).astype(int).astype(str) + ' min')
+                     + ') · ' + minutes_text)
     return top[['personid', 'displayname', 'category', 'value', 'detail']].assign(alert_key='playing_up')
 
 
