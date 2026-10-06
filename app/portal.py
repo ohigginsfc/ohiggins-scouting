@@ -128,9 +128,8 @@ def render_scouting(user):
         'Consultar jugador': scouting._render_player_lookup,
         'Comparación': scouting._render_comparison_tab,
         'Datos objetivos': scouting._render_objective_explorer,
+        'Informes ocultos': scouting._render_hidden_reports_page,
     }
-    if user['role'] == 'admin':
-        pages['Informes ocultos'] = scouting._render_hidden_reports_page
     current = ensure_current_page(list(pages))
     for col, name in zip(st.columns(len(pages)), pages):
         col.button(name, key=nav_button_key(name), use_container_width=True,

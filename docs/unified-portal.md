@@ -17,6 +17,7 @@ guarda contraseñas y no debe exponerse en la Data API. Los esquemas `public`
 | Seguimiento deportivo COMET (partido semanal, rankings, ficha, indicadores, alertas, adelantados) | Sí | No |
 | Configurar reglas y alertas COMET; marcar jugadores proyectados o de selección y sus períodos | Sí | No |
 | Scouting visible, estadísticas y comparaciones | Sí | Sí |
+| Consultar informes ocultos y sus valoraciones | Sí | Sí, solo lectura |
 | Crear informes | Sí | Sí |
 | Editar evaluación y recomendación | Todos | Solo propios visibles |
 | Ocultar, restaurar o eliminar informes | Sí | No |
@@ -37,6 +38,11 @@ distinta, de solo lectura. No se enriquece scouting con información federada.
 La migración `002_comet_reader.sql` incluye políticas RLS de SELECT para ese
 lector: conceder SELECT sin una política RLS puede devolver cero filas aunque
 las tablas tengan datos. Validar conteos no vacíos al configurar COMET.
+
+El contador y la sección **Informes ocultos** están disponibles para ambos roles.
+Scout puede consultar su contenido y valoraciones, pero no editarlos, restaurarlos
+ni eliminarlos, incluso cuando es autor del informe. Estas restricciones se
+comprueban también en los servicios; no requieren cambios de permisos de la BD.
 
 Cada sesión se valida contra Supabase Auth y el perfil privado en cada ejecución
 de Streamlit. Cambiar rol/estado/contraseña desde el portal revoca las sesiones del
