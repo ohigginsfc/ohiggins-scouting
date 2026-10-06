@@ -7,7 +7,8 @@ comparación entre temporadas y actualización de datos desde la interfaz.
 
 El nuevo punto de entrada `app/portal.py` reúne ambos módulos con cuentas personales
 en Supabase Auth. Administración accede a COMET y scouting; el rol scout solo a
-scouting y puede editar sus propios informes. Los datos deportivos conservan sus
+scouting y puede editar sus propios informes visibles. Ambos roles pueden consultar
+informes ocultos; restaurarlos o eliminarlos corresponde al administrador. Los datos deportivos conservan sus
 esquemas y las sincronizaciones continúan como procesos independientes.
 
 COMET incluye, solo para administración, el [seguimiento deportivo](docs/comet-seguimiento-deportivo.md)

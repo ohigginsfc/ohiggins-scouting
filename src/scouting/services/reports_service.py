@@ -18,8 +18,8 @@ def count_reports(conn: Connection, *, include_hidden: bool = False) -> int:
 
 
 def count_hidden_reports(conn: Connection) -> int:
-    if os.environ.get('PORTAL_MODE') == '1' and require_user()['role'] != 'admin':
-        return 0
+    if os.environ.get('PORTAL_MODE') == '1':
+        require_user()
     return reports_repository.count_hidden_reports(conn)
 
 
@@ -33,7 +33,7 @@ def fetch_visible_reports(conn: Connection, limit: int = 50) -> list[dict[str, A
 
 def fetch_hidden_reports(conn: Connection, limit: int = 100) -> list[dict[str, Any]]:
     if os.environ.get('PORTAL_MODE') == '1':
-        require_admin()
+        require_user()
     return reports_repository.get_hidden_reports(conn, limit=limit)
 
 

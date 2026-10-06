@@ -779,7 +779,11 @@ def _render_visible_reports_management(reports: list[dict[str, Any]]) -> None:
 
 def _render_hidden_reports_page() -> None:
     _dashboard_flash_pop()
-    st.caption("Restaura informes ocultos o elimínalos de forma permanente.")
+    can_manage = True
+    if os.environ.get('PORTAL_MODE') == '1':
+        from scouting.portal.security import require_user
+        can_manage = require_user()['role'] == 'admin'
+    st.caption("Restaura informes ocultos o elimínalos de forma permanente." if can_manage else "Consulta de informes ocultos.")
 
     with get_connection() as conn:
         hidden = fetch_hidden_reports(conn, limit=200)
@@ -827,6 +831,29 @@ def _render_hidden_reports_page() -> None:
         f"{format_date_for_ui(report.get('report_date'))} · "
         f"Scout: {report.get('scout_name') or '—'}"
     )
+
+    st.write({
+        'Valoración': report.get('rating'),
+        'Recomendación': report.get('recommendation'),
+        'Partido observado': report.get('match_observed'),
+        'Posición observada': report.get('position_observed'),
+        'Minutos observados': report.get('minutes_observed'),
+    })
+    for field, label in [('summary', 'Resumen'), ('strengths', 'Fortalezas'), ('weaknesses', 'Aspectos a mejorar')]:
+        if report.get(field):
+            st.markdown(f'**{label}**')
+            st.write(report[field])
+    if report.get('video_url'):
+        st.write('Video:', report['video_url'])
+    with get_connection() as conn:
+        ratings = attribute_ratings_service.get_report_attribute_ratings(conn, report_id)
+    if ratings:
+        st.markdown('**Valoraciones por atributo**')
+        st.dataframe(pd.DataFrame(ratings)[['attribute_group', 'attribute_name', 'rating', 'max_rating', 'notes']],
+                     use_container_width=True, hide_index=True)
+
+    if not can_manage:
+        return
 
     r1, r2 = st.columns([1, 1.4])
     if r1.button(labeled("restore", "Restaurar"), type="secondary", key="hidden_restore_report"):
