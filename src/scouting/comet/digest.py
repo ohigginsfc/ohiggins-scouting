@@ -75,7 +75,7 @@ def week_matches(ds: Dataset, week_start: date) -> pd.DataFrame:
 
 
 def build_weekly_digest(ds: Dataset, alerts: pd.DataFrame, week_start: date, *, generated_on: date,
-                        pending_rules: Optional[int] = None, blocked: int = 0) -> Digest:
+                        pending_rules: Optional[int] = None, blocked: int = 0, no_minutes: int = 0) -> Digest:
     week_end = week_start + timedelta(days=6)
     matches = week_matches(ds, week_start)
     title = f'Resumen semanal COMET · semana del {week_span(week_start, week_end)}'
@@ -134,6 +134,9 @@ def build_weekly_digest(ds: Dataset, alerts: pd.DataFrame, week_start: date, *, 
     if blocked:
         notes.append(f'{blocked} jugador(es) no se evalúan en las alertas porque COMET trae filas repetidas con valores '
                      'distintos en sus planillas y no se elige ninguna.')
+    if no_minutes:
+        notes.append(f'{no_minutes} jugador(es) no se evalúan en la alerta de participación porque COMET no trae los minutos '
+                     'de algún partido en que jugaron; no se calcula con una suma parcial.')
     if pending_rules:
         notes.append(f'{pending_rules} reglas de cálculo son supuestos pendientes de confirmar con Pablo; '
                      'las cifras pueden cambiar cuando se aprueben.')

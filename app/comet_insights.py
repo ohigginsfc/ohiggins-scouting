@@ -72,6 +72,11 @@ def page_indicators() -> None:
         if int(ind['filas_contradictorias'].sum()):
             st.caption('Las filas contradictorias (repetidas con valores distintos) no se suman: los totales de esas series '
                        'están incompletos. Detalle en Seguimiento y configuración → Calidad de datos.')
+        if int(ind['actuaciones_sin_minutos'].sum()):
+            st.caption(f'{int(ind["jugadores_minutos_incompletos"].sum())} jugador(es) tienen partidos sin minutos conocidos: '
+                       'no entran en la participación de la serie (ni en el numerador ni en el denominador) y los minutos '
+                       f'totales no incluyen {int(ind["actuaciones_sin_minutos"].sum())} actuaciones sin minutos. '
+                       'Detalle en Seguimiento y configuración → Calidad de datos.')
         horizon = quality.history_horizon(ds)
         if seniority_from_profile:
             st.caption('La antigüedad usa la fecha «datefrom» de la ficha de COMET; si falta, queda sin dato. '
@@ -205,6 +210,13 @@ def page_alerts() -> None:
             st.write('COMET trae filas repetidas con valores distintos para estos jugadores y partidos; no se elige ninguna. '
                      'Sus cifras están incompletas, así que ninguna alerta los considera hasta que se aclare el dato.')
             show_table(_named(blocked), {'displayname': ('Jugador', None), 'partidos': ('Partidos afectados', FMT_INT)})
+    no_minutes = ds.minutes_gap_players(season)
+    if len(no_minutes):
+        with st.expander(f'{len(no_minutes)} jugador(es) sin minutos completos: no se evalúa su participación', expanded=False):
+            st.write('COMET no trae los minutos de algún partido en que estos jugadores jugaron (o la marca de jugó contradice '
+                     'los minutos). La alerta de baja participación no se calcula con una suma parcial; las demás alertas '
+                     'siguen vigentes para ellos.')
+            show_table(_named(no_minutes), {'displayname': ('Jugador', None), 'partidos': ('Partidos sin minutos', FMT_INT)})
     if found.empty:
         st.success('No hay alertas activas con la configuración actual.')
         return
@@ -240,6 +252,11 @@ def page_adelantados() -> None:
         st.warning(f'{len(blocked)} jugador(es) quedan fuera de los indicadores de adelantados, permanencia y '
                    'comparación por planillas contradictorias en esta temporada. Sus actuaciones válidas siguen '
                    'disponibles en la ficha y los partidos. Ver Seguimiento y configuración → Calidad de datos.')
+    no_minutes = ds.minutes_gap_players(season)
+    if len(no_minutes):
+        st.warning(f'{len(no_minutes)} jugador(es) quedan fuera de los indicadores de adelantados porque COMET no trae los '
+                   'minutos de algún partido en que jugaron (o la marca de jugó los contradice): no se afirman minutos '
+                   'arriba, permanencia ni comparación con una suma parcial. Ver Seguimiento y configuración → Calidad de datos.')
     players = adelantados.ahead_players(ds, season)
     share = adelantados.ahead_share_by_category(ds, season)
     total_minutes = share['minutos'].sum(min_count=1)
@@ -447,7 +464,8 @@ def _tab_digest(ctx: Context) -> None:
     found = alert_rules.evaluate_alerts(ds, ctx.computed.cat, season, ctx.alert_config) if season else pd.DataFrame(
         columns=['alert_key'])
     digest = build_weekly_digest(ds, found, week.date(), generated_on=ctx.today.date(), pending_rules=len(ctx.rules.pending()),
-                                 blocked=len(ds.blocked_players(season)) if season else 0)
+                                 blocked=len(ds.blocked_players(season)) if season else 0,
+                                 no_minutes=len(ds.minutes_gap_players(season)) if season else 0)
     a, b, c = st.columns(3)
     a.metric('Partidos en la semana', digest.matches)
     b.metric('Alertas vigentes', digest.alerts)

@@ -19,6 +19,8 @@ Capturas de cada pantalla (datos ficticios) en [`comet-seguimiento/capturas`](co
 ## Regla de oro: nada inventado ni ocultado
 
 * **Un dato que falta se ve como «—», nunca como 0.** Un 0 solo aparece cuando es cierto (por ejemplo, los minutos de un suplente que no ingresó).
+* **Un total con un sumando desconocido es desconocido.** Si COMET no trae los minutos de un partido en que el jugador jugó, sus minutos y su participación
+  se ven como «—»; no se muestra la suma de los demás partidos como si fuera el total (ver *Minutos desconocidos* más abajo).
 * **Ninguna regla supuesta se presenta como aprobada por Pablo.** Cada regla tiene origen (`pablo` o `supuesto`) y las pantallas
   que dependen de un supuesto muestran un aviso «Criterios provisionales» con la etiqueta *Supuesto: pendiente de confirmar*.
   Solo pasan a *Confirmada por el club* cuando un administrador lo marca en Seguimiento y configuración.
@@ -49,6 +51,7 @@ Estado: ✅ implementado · 🟠 implementado con una regla provisional (pendien
 Minutos jugados ✅ · Goles ✅ · Tarjetas amarillas y rojas ✅ · Partidos ganados con el jugador en cancha 🟠.
 Filtro por temporada y categoría; los empates comparten posición; quien no tiene datos o está en 0 no entra.
 Los jugadores con planillas contradictorias (ver más abajo) no entran y se listan en un aviso.
+El ranking de minutos tampoco incluye a quien tiene algún partido sin minutos conocidos (se lista en un aviso): goles y tarjetas sí cuentan en sus rankings.
 
 ### Información individual
 
@@ -61,7 +64,7 @@ Evolución de minutos por mes o semestre ✅ (solo períodos con partidos; un me
 
 | Indicador | Estado |
 |---|---|
-| % de participación (minutos jugados / minutos posibles) | 🟠 (numerador y denominador salen del mismo conjunto de partidos; el porcentaje no se redondea antes de compararlo con un umbral) |
+| % de participación (minutos jugados / minutos posibles) | 🟠 (numerador y denominador salen del mismo conjunto de partidos; el porcentaje no se redondea antes de compararlo con un umbral; la participación de una serie deja fuera, en numerador y denominador, a quien tiene partidos sin minutos conocidos) |
 | % de victorias con el jugador en cancha | 🟠 |
 | Promedio de edad por categoría | 🟠 (depende de la fecha de corte) |
 | Promedio de antigüedad por categoría | 🟠 (por defecto desde el primer partido registrado, que es un mínimo; la regla permite usar `datefrom`, sin dato si falta) |
@@ -76,7 +79,7 @@ Evolución de minutos por mes o semestre ✅ (solo períodos con partidos; un me
 | Requisito | Estado | Detalle |
 |---|---|---|
 | Jugador con 4 amarillas | 🟠 | Alerta con 4 **o más**, dentro de cada competición (ciclo pendiente). Las segundas amarillas se avisan en el detalle pero no se suman |
-| Menos del 20 % de los minutos posibles | 🟠 | Estrictamente menor que 20 %, comparando minutos × 100 con umbral × posibles (1199 de 6000 = 19,98 % alerta; 1200 no), sobre la categoría principal de la temporada |
+| Menos del 20 % de los minutos posibles | 🟠 | Estrictamente menor que 20 %, comparando minutos × 100 con umbral × posibles (1199 de 6000 = 19,98 % alerta; 1200 no), sobre la categoría principal de la temporada. Quien tiene algún partido sin minutos conocidos no se evalúa (se lista aparte) |
 | Jugando en categorías superiores | 🟠 | Con minutos en una categoría superior a la que le corresponde por edad |
 | Más de 2 temporadas sin promoción | 🟠 | 3 o más temporadas seguidas en la misma categoría, según el historial disponible; un hueco de temporadas corta el conteo |
 | Adelantados: quiénes, minutos, % por categoría, permanencia, comparación con su grupo de edad | 🟠 | Pantalla *Jugadores adelantados* |
@@ -213,6 +216,62 @@ Las temporadas históricas de Sofascore pertenecen a Scouting y no cuentan aquí
 ## Cierre de la segunda auditoría
 
 Los indicadores de adelantados, permanencia y comparación excluyen a jugadores con planillas contradictorias en cualquier categoría de la temporada seleccionada. La pantalla muestra cuántos se excluyen. Las actuaciones válidas siguen disponibles en la ficha y los partidos; una contradicción de otra temporada no bloquea la actual. La explicación de antigüedad refleja la fuente seleccionada (`datefrom` o primer partido).
+
+## Minutos desconocidos (revisión del 06-10-2026)
+
+**Problema.** Si COMET no traía los minutos de un partido en que el jugador jugó, el total de minutos sumaba solo los partidos que sí los traían y se mostraba
+como si fuera exacto. Un jugador que jugó dos partidos y de uno no tiene minutos aparecía con «80 minutos» y «33,3 % de participación», se ordenaba en el
+ranking de minutos con esa cifra y, con pocos minutos conocidos, disparaba la alerta de «menos del 20 %». Del mismo modo, una fila sin la marca de jugó y sin
+minutos se contaba como «0 minutos», y una fila marcada «no jugó» con minutos distintos de cero ignoraba esos minutos en silencio.
+
+**Regla.** Un total con un sumando desconocido es desconocido. Se considera que no se sabe cuántos minutos jugó un jugador en un partido cuando:
+
+| Situación en la planilla | Antes | Ahora |
+|---|---|---|
+| Jugó (marca de jugó) y no trae minutos | Suma parcial de los demás partidos | Minutos y participación «—» |
+| No trae marca de jugó ni minutos | 0 minutos y 0 goles inventados | Minutos «—» (los goles solo si la fila los trae) |
+| Marca «no jugó» pero trae minutos | Minutos ignorados (0) | Minutos «—»: la fuente se contradice y no se elige una versión |
+
+Las apariciones (partidos citado, titular, suplente, jugó), los goles y las tarjetas del jugador **no cambian**, y los minutos *posibles* tampoco dependen de este dato.
+Las filas repetidas contradictorias siguen su propia política (ver arriba) y no cuentan además como «minutos desconocidos».
+
+**Efecto en las pantallas.** Cada una lo avisa con el nombre del jugador y manda a *Calidad de datos*, donde hay un control nuevo, *Jugadores con minutos desconocidos*.
+
+| Dónde | Qué pasa con un jugador con minutos desconocidos |
+|---|---|
+| Ficha | Minutos, participación y minutos en categoría superior en «—»; el mes afectado no se dibuja como una suma parcial |
+| Ranking de minutos | No entra y se lista en un aviso; en goles, tarjetas y partidos ganados sí figura |
+| Alerta «menos del 20 %» | No se evalúa (en ninguna categoría de la temporada: sin minutos no se sabe cuál es su categoría principal) y se lista en la pantalla de alertas |
+| Alerta «juega en categoría superior» | Sigue vigente; el detalle dice «minutos incompletos» en vez de citar una suma parcial |
+| Participación de la serie (indicadores) | Se calcula sin él en numerador **y** denominador; los minutos totales de la serie avisan cuántas actuaciones quedaron fuera |
+| Jugadores adelantados | Quedan fuera de los indicadores basados en minutos (minutos arriba, permanencia, comparación) y se avisa cuántos son |
+| Resumen semanal (pantalla y correo) | Las mismas alertas, más una nota con cuántos jugadores no se evalúan en la de participación |
+
+**Ejemplo antes / después** (mini-torneo ficticio de `tests/comet_tiny.py`: U-15 con tres partidos de 80 minutos; P1 jugó los partidos 1 y 2, y de los minutos del 2 COMET no trae el dato):
+
+| | Antes | Ahora |
+|---|---|---|
+| Minutos de P1 | 80 | — |
+| Participación de P1 | 33,3 % | — |
+| Ranking de minutos U-15 | 1.º P2 (190), 2.º P3 (160), 3.º **P1 (80)** | 1.º P2 (190), 2.º P3 (160); P1 en el aviso |
+| Participación de la serie U-15 | 44,8 % | 48,6 % = (190 + 160 + 0) / (3 × 240) |
+| Si P1 jugó los 3 partidos y solo se conocen 10 minutos | Alerta «4,16 % · 10 de 240 min posibles» | Sin alerta; P1 figura como jugador sin minutos completos |
+
+Pruebas: `tests/test_comet_unknown_minutes.py` (cálculos y pantallas) y una prueba con un `NULL` real en `tests/test_comet_postgres.py`.
+**No se pudo comprobar con datos reales ni en la web:** se ignora cuántas veces ocurre esto en COMET. El control de calidad lo cuenta; si es 0, esta corrección no cambia ninguna cifra.
+
+### Hallazgos de esta revisión que NO se corrigieron
+
+Quedan documentados con su reproducción para decidir cuál sigue (varios dependen de una regla que aún debe confirmar Pablo):
+
+| # | Hallazgo | Reproducción con el mini-torneo | Qué falta |
+|---|---|---|---|
+| 1 | **Edad ausente = «no adelantado» y 0 minutos arriba.** Sin fecha de nacimiento, `ahead_minutes` queda en 0 (no «—») y el «% de adelantados» de la categoría los cuenta en el denominador | P2 sin nacimiento: la ficha muestra 0 minutos arriba y la categoría U-15 «0 de 3 adelantados (0,0 %)» en vez de «sin dato» | Excluir del denominador a quien no tiene edad y mostrar «—» |
+| 2 | **Con la duración «nominal», un partido ya pasado sin planilla ni marcador cuenta como minutos posibles** (con la duración «registrada», la de por defecto, no) | Un partido extra U-15 sin planilla: minutos posibles de P1 pasan de 240 a 320 y su participación de 58,3 % a 43,8 % | Que Pablo elija la fuente de duración y qué estados de partido no cuentan |
+| 3 | **Un jugador citado una sola vez en una serie suma todos los partidos de la serie como minutos posibles** (por defecto), lo que desinfla la participación de la serie | Seis invitados citados una vez en la U-15: participación de la serie de 51,0 % a 20,4 % | Pregunta 2 de Pablo (¿desde que llegó o toda la serie?) y, si se confirma, un mínimo de citaciones para contar como parte de la serie |
+| 4 | **«N temporadas seguidas en U-14» tras un descenso**: la racha cuenta temporadas sin subir de categoría, pero el texto afirma que estuvo todo ese tiempo en la categoría actual | Jugador en U-15 (2024) y U-14 (2025, 2026): «3 temporadas seguidas en U-14 (desde 2024)» | Pregunta 5 de Pablo (qué es «promoción»); mientras tanto, corregir el texto |
+| 5 | **Amarillas con ciclo «por temporada»: la categoría mostrada es la de la última fila de la planilla**, no la principal | P2 (U-15 principal, U-14 secundaria) aparece con categoría U-14 | Mostrar la categoría principal |
+| 6 | **«Adelantados» y «Grupo de edad» comparten jugadores** cuando alguien reparte minutos entre su categoría y la superior | P2 figura en los dos grupos de la categoría por edad U-14 | Decidir si el grupo de comparación debe excluir a los adelantados |
 
 ## Hallazgos que no se tocaron
 
