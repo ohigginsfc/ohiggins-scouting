@@ -88,10 +88,11 @@ equipo, actuaciones de jugadores y arqueros. `competidores` usa la clave natural
 - No se escribe en `scouting` ni en `portal`, no se aplican migraciones, no se
   eliminan datos ni se reinicia la web.
 
-Esta sincronización no envía correos ni regenera las hojas de reportes del legado.
-El resumen deportivo del portal sigue en `scripts/send_comet_weekly_digest.py`,
-con sus condiciones de destinatarios, SMTP y registro de entregas. Los workflows
-antiguos se mantienen durante esta PR; su desactivación es una acción posterior.
+El job de ingestión no envía correos ni modifica Sheets. Después de una sincronización
+correcta, el mismo workflow puede publicar los reportes por categoría y alertas,
+enviar el resumen deportivo semanal y notificar el estado final. Todos esos procesos
+viven en el repo unificado: ver [reportes y correos COMET](comet-reports-email.md).
+Los dos workflows operativos de `dataProject` deben permanecer desactivados.
 
 ## Finalizar la transición
 

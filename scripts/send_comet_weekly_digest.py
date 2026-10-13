@@ -20,8 +20,8 @@ el correo pudo haber salido. Código de salida 1 si algo quedó fallido, agotado
 El cálculo es el mismo de las pantallas (reglas, períodos de selección y alertas guardados en Supabase), así que el
 correo y la pantalla no pueden mostrar cifras distintas para la misma semana.
 
-Lee COMET con COMET_DATABASE_URL (rol de solo lectura). Este script no está programado en ningún lado: programarlo
-es una decisión posterior a que Pablo confirme destinatarios, día y hora.
+Lee COMET con COMET_DATABASE_URL (rol de solo lectura). Actions lo ejecuta después de sincronizar y publicar
+reportes, si COMET_DIGEST_ENABLED=true. La reserva semanal evita repetir el correo en la segunda ejecución.
 """
 from __future__ import annotations
 
@@ -73,9 +73,14 @@ def run(argv=None, *, env=None, load_raw=None, stored=None, now=None, smtp_facto
     parser.add_argument('--week-of', help='una fecha dentro de la semana a resumir (AAAA-MM-DD); por defecto, la semana anterior')
     parser.add_argument('--html-out', help='guarda la versión HTML en este archivo')
     parser.add_argument('--send', action='store_true', help='envía el correo (ver condiciones en la ayuda)')
+    parser.add_argument('--quiet', action='store_true', help='omite contenido deportivo y destinatarios en logs de Actions')
     parser.add_argument('--max-attempts', type=int, default=DEFAULT_MAX_ATTEMPTS,
                         help='intentos de envío por semana y destinatario (por defecto %(default)s)')
     args = parser.parse_args(argv)
+    if args.quiet:
+        output = out
+        out = lambda message: None
+        output('Resumen COMET: contenido deportivo omitido del log; cualquier fallo devuelve un código distinto de cero.')
     env = os.environ if env is None else env
     today = pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz=LOCAL_TZ).tz_localize(None)
 
@@ -127,6 +132,9 @@ def run(argv=None, *, env=None, load_raw=None, stored=None, now=None, smtp_facto
         out(f'No se envía: el registro de entregas no está disponible ({exc}).')
         return 2
     out(f'Enviados ahora: {len(report.sent)} · ya enviados antes (omitidos): {len(report.already_sent)}.')
+    if args.quiet:
+        output(f'Resumen semanal: SMTP aceptó {len(report.sent)} entrega(s); {len(report.already_sent)} ya registradas; '
+               f'{len(report.failed) + len(report.exhausted) + len(report.in_doubt) + len(report.unrecorded)} con incidencias.')
     if report.failed:
         out(f'Fallaron {len(report.failed)}: se reintentan en la próxima ejecución (hasta {args.max_attempts} intentos).')
     if report.exhausted:
@@ -138,4 +146,8 @@ def run(argv=None, *, env=None, load_raw=None, stored=None, now=None, smtp_facto
 
 
 if __name__ == '__main__':
-    sys.exit(run())
+    try:
+        sys.exit(run())
+    except Exception as exc:
+        print(f'Resumen COMET fallido: {type(exc).__name__}; revisar configuración, datos y registro de entregas.', file=sys.stderr)
+        sys.exit(1)

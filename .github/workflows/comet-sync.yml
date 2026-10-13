@@ -7,6 +7,10 @@ on:
         description: Descargar y validar sin publicar (desmarcar para publicar desde main)
         type: boolean
         default: true
+      reports_only:
+        description: Recalcular reportes desde la BD, sin volver a descargar COMET
+        type: boolean
+        default: false
   schedule:
     - cron: '0 6 * * 1,3'
 
@@ -21,7 +25,7 @@ jobs:
   sync:
     # Inactivo por defecto mientras el repo legado siga programado. Activación
     # explícita DESPUÉS de desactivar el legado: COMET_SCHEDULE_ENABLED=true.
-    if: github.event_name != 'schedule' || vars.COMET_SCHEDULE_ENABLED == 'true'
+    if: (github.event_name != 'schedule' || vars.COMET_SCHEDULE_ENABLED == 'true') && !inputs.reports_only
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -66,3 +70,96 @@ jobs:
           path: data/runtime/comet-sync-summary.json
           if-no-files-found: error
           retention-days: 14
+
+  reports:
+    needs: sync
+    if: >-
+      always() && !cancelled() &&
+      (needs.sync.result == 'success' || inputs.reports_only == true) &&
+      (vars.COMET_REPORTS_ENABLED == 'true' || inputs.reports_only == true)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MODE: ${{ github.event_name == 'schedule' && 'publish' || (inputs.dry_run && 'dry-run' || 'publish') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            requirements-comet-sync.txt
+            requirements-comet-reports.txt
+      - run: python -m pip install -r requirements-comet-reports.txt
+      - name: Validate publication branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$MODE" = publish ] && [ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+            echo 'La publicación de reportes y el envío requieren la rama principal revisada.'
+            exit 1
+          fi
+      - name: Validate SMTP without sending
+        if: vars.COMET_NOTIFICATIONS_ENABLED == 'true' || vars.COMET_DIGEST_ENABLED == 'true'
+        env:
+          COMET_REPORT_SMTP_HOST: ${{ vars.COMET_REPORT_SMTP_HOST || 'smtp.gmail.com' }}
+          COMET_REPORT_SMTP_USER: ${{ secrets.COMET_REPORT_SMTP_USER }}
+          COMET_REPORT_SMTP_PASSWORD: ${{ secrets.COMET_REPORT_SMTP_PASSWORD }}
+          COMET_REPORT_SMTP_PORT: ${{ secrets.COMET_REPORT_SMTP_PORT }}
+        run: python scripts/notify_comet_run.py --check-smtp
+      - name: Calculate and optionally publish category reports and alerts
+        env:
+          GOOGLE_SV_B64: ${{ secrets.GOOGLE_SV_B64 }}
+          COMET_SUPABASE_URL: ${{ secrets.COMET_SUPABASE_URL }}
+          COMET_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.COMET_SUPABASE_SERVICE_ROLE_KEY }}
+          COMET_REPORT_SEASON: ${{ vars.COMET_REPORT_SEASON || '2026' }}
+          COMET_REPORT_SHEET_ID: ${{ vars.COMET_REPORT_SHEET_ID || '15R7y6NqN6ZEkcVc_TB8UMT2AQjGvavKQmiyblI1okYk' }}
+        run: |
+          if [ "$MODE" = publish ]; then
+            python scripts/publish_comet_reports.py --publish --summary-json data/runtime/comet-reports-summary.json
+          else
+            python scripts/publish_comet_reports.py --summary-json data/runtime/comet-reports-summary.json
+          fi
+      - name: Send weekly sports digest once per week and recipient
+        if: env.MODE == 'publish' && vars.COMET_DIGEST_ENABLED == 'true'
+        env:
+          COMET_DATABASE_URL: ${{ secrets.COMET_DATABASE_URL }}
+          PORTAL_AUTH_DATABASE_URL: ${{ secrets.PORTAL_AUTH_DATABASE_URL }}
+          COMET_DIGEST_SMTP_HOST: ${{ vars.COMET_REPORT_SMTP_HOST || 'smtp.gmail.com' }}
+          COMET_DIGEST_SMTP_FROM: ${{ secrets.COMET_REPORT_SMTP_USER }}
+          COMET_DIGEST_SMTP_USER: ${{ secrets.COMET_REPORT_SMTP_USER }}
+          COMET_DIGEST_SMTP_PASSWORD: ${{ secrets.COMET_REPORT_SMTP_PASSWORD }}
+          COMET_DIGEST_SMTP_PORT: ${{ secrets.COMET_REPORT_SMTP_PORT }}
+        run: python scripts/send_comet_weekly_digest.py --send --quiet
+      - name: Aggregate report receipt (no player records)
+        uses: actions/upload-artifact@v4
+        with:
+          name: comet-reports-summary
+          path: data/runtime/comet-reports-summary.json
+          if-no-files-found: error
+          retention-days: 14
+
+  notify:
+    needs: [sync, reports]
+    if: >-
+      always() && !cancelled() && vars.COMET_NOTIFICATIONS_ENABLED == 'true' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      (github.event_name == 'schedule' && vars.COMET_SCHEDULE_ENABLED == 'true' ||
+       github.event_name == 'workflow_dispatch' && inputs.dry_run == false)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements-comet-reports.txt
+      - name: Notify final pipeline status without private data
+        env:
+          COMET_REPORT_NOTIFICATION_TO: ${{ vars.COMET_REPORT_NOTIFICATION_TO }}
+          COMET_REPORT_SMTP_HOST: ${{ vars.COMET_REPORT_SMTP_HOST || 'smtp.gmail.com' }}
+          COMET_REPORT_SMTP_USER: ${{ secrets.COMET_REPORT_SMTP_USER }}
+          COMET_REPORT_SMTP_PASSWORD: ${{ secrets.COMET_REPORT_SMTP_PASSWORD }}
+          COMET_REPORT_SMTP_PORT: ${{ secrets.COMET_REPORT_SMTP_PORT }}
+          STATUS: ${{ (needs.sync.result == 'success' || inputs.reports_only == true) && (needs.reports.result == 'success' || (needs.reports.result == 'skipped' && vars.COMET_REPORTS_ENABLED != 'true' && inputs.reports_only != true)) && 'success' || 'failure' }}
+        run: python scripts/notify_comet_run.py --status "$STATUS"

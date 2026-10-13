@@ -1,0 +1,3 @@
+# Worker de reportes/correos; separado del runtime web.
+-r requirements-comet-sync.txt
+psycopg[binary]==3.2.3

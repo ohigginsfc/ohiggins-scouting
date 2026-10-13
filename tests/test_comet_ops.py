@@ -83,6 +83,12 @@ def test_default_run_is_a_preview_and_sends_nothing(tmp_path):
     assert FakeSMTP.instances == [] and '<p' in target.read_text(encoding='utf8')
 
 
+def test_quiet_preview_omits_players_and_content_from_logs():
+    code, output = run_job(['--quiet', '--week-of', '2026-03-16'], {}, SMTP_ENV)
+    assert code == 0 and 'contenido deportivo omitido' in output
+    assert 'Campeonato U-15 2026' not in output and FakeSMTP.instances == []
+
+
 @pytest.mark.parametrize('stored, env, reason', [
     ({}, SMTP_ENV, 'destinatarios'),                                                           # sin destinatarios
     ({'digest_recipients': {'value': ['a@example.test'], 'confirmed': False}}, SMTP_ENV, 'destinatarios'),  # sin confirmar

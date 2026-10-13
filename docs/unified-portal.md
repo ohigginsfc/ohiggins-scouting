@@ -3,7 +3,7 @@
 Una aplicación Streamlit con módulos COMET y Scouting. Las sincronizaciones siguen
 independientes dentro del repo unificado: COMET tiene su [importador y workflow](comet-synchronization.md);
 Sofascore conserva su worker y su procedimiento de actualización. La programación
-COMET del nuevo repo permanece desactivada hasta retirar el job del legado. No se
+COMET se activa con `COMET_SCHEDULE_ENABLED=true` después de retirar el job antiguo. No se
 mezclan las tablas deportivas ni se usa un iframe entre aplicaciones.
 
 ## Identidad y permisos
@@ -100,6 +100,27 @@ versión no implementa un flujo de recuperación por correo ni envía invitacion
 
 ## Validación y reversión
 
+Si aparece «No se pudo iniciar sesión», comprobar Auth **y la conexión de perfiles**;
+ese mensaje no identifica por sí solo una contraseña incorrecta. El `.env` de la web
+antigua de scouting no sustituye `.env.portal`: completar sus seis variables de Auth
+y conexiones con los valores privados reales, nunca `replace-me` ni los ejemplos.
+Las cuentas existentes no se recrean al actualizar.
+
+```bash
+docker compose --env-file .env.portal -f docker-compose.portal.yml exec -T portal python scripts/check_portal_config.py
+```
+
+El comprobador solo lee y muestra PASS/FAIL, tipos de fallo y códigos HTTP; no imprime
+claves, DSN, correos ni tokens. Si se corrige `.env.portal`, recrear el contenedor:
+
+```bash
+docker compose --env-file .env.portal -f docker-compose.portal.yml up -d --build --force-recreate portal
+```
+
+Usar el mismo `--env-file .env.portal` y archivo Compose tanto al arrancar como al
+comprobar. Revisar variables exportadas en la shell: pueden tener prioridad sobre el
+archivo. Comprobar primero en el puerto interno; después en la URL del proxy.
+
 - Testear login real y las pantallas de COMET/scouting con el admin.
 - Testear scout, URL/estado manipulado, caché COMET previamente cargada, informe
   ajeno/propio/migrado, cuentas desactivadas, cambios de rol y último admin.
@@ -138,8 +159,9 @@ vista previa en el Dashboard; la página de gestión ya mostraba el detalle comp
 
 `app/comet_dashboard.py` incorpora las cinco pantallas de dataProject/main,
 commit `c6a0024b11b2e5b4fd3722017e08aadc101db180`, adaptadas al login común y a la
-conexión de lectura exclusiva del admin. No se importan ni duplican los automatismos
-de COMET. Los requisitos nuevos del club (partido semanal, rankings, ficha individual,
+conexión de lectura exclusiva del admin. El [importador](comet-synchronization.md), los
+[reportes y correos](comet-reports-email.md) también viven en este repo, en workers
+independientes del portal. Los requisitos nuevos del club (partido semanal, rankings, ficha individual,
 indicadores, alertas, adelantados, marcas y resumen semanal) están descritos en
 [Seguimiento deportivo COMET](comet-seguimiento-deportivo.md); leen COMET con la misma
 conexión de solo lectura y no modifican `dataProject`.
