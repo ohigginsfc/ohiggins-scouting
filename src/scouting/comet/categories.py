@@ -10,6 +10,9 @@ import pandas as pd
 
 SENIOR_LABEL = 'Primer Equipo'
 SENIOR_RANK = 1000
+# Secciones del club (reunión con Pablo, 13-10-2026): sub-20, sub-18, sub-16, sub-15, sub-14, sub-13, sub-12 «y así».
+# Cada sección reúne a quienes tienen hasta ese tope de edad y más que la sección menor siguiente.
+DEFAULT_LADDER_CAPS = (20, 18, 16, 15, 14, 13, 12, 11)
 _YOUTH = re.compile(r'^\s*(?:u|sub)\s*[-_ ]?\s*(\d{1,2})\s*$', re.IGNORECASE)
 _SENIOR = {'primer equipo', 'primera', 'adulto', 'adultos'}
 
@@ -45,6 +48,47 @@ def order_categories(labels: Iterable, *, descending: bool = True) -> list[str]:
         if cat.rank is not None:
             seen[cat.label] = cat.rank
     return sorted(seen, key=seen.get, reverse=descending)
+
+
+def build_ladder(caps: Iterable[int], data_categories: Iterable = ()) -> list[str]:
+    """Escalera de categorías, de mayor a menor: las secciones oficiales más las que haya en los datos.
+
+    Una categoría que COMET trae y no está en la lista oficial se agrega (no se descarta ni se inventa su tope);
+    una sección oficial sin partidos sigue contando para saber qué categoría le corresponde a un jugador por edad.
+    """
+    labels = {SENIOR_LABEL: SENIOR_RANK}
+    for cap in caps:
+        labels[f'U-{int(cap)}'] = int(cap)
+    for label in data_categories:
+        parsed = parse_category(label)
+        if parsed.rank is not None:
+            labels[parsed.label] = parsed.rank
+    return sorted(labels, key=labels.get, reverse=True)
+
+
+def parse_ladder(text) -> tuple[int, ...]:
+    """'20,18,16' -> (20, 18, 16); ValueError si no es una lista de edades entre 5 y 25 sin repetir."""
+    try:
+        caps = [int(part) for part in str(text).replace(';', ',').split(',') if part.strip()]
+    except ValueError:
+        raise ValueError('usa edades separadas por coma, por ejemplo 20,18,16,15,14,13,12') from None
+    if not caps or len(set(caps)) != len(caps) or any(cap < 5 or cap > 25 for cap in caps):
+        raise ValueError('usa edades distintas entre 5 y 25, por ejemplo 20,18,16,15,14,13,12')
+    return tuple(sorted(caps, reverse=True))
+
+
+def age_category_case_sql(age_expr: str, caps: Iterable[int] = DEFAULT_LADDER_CAPS) -> str:
+    """CASE de SQL con la misma regla que `category_for_age` (la U-N más pequeña cuyo tope alcanza para la edad).
+
+    Es la única definición para las pantallas antiguas de COMET (que consultan la edad en SQL) y para el cálculo nuevo.
+    """
+    ordered = sorted({int(cap) for cap in caps})
+    lines = [f'WHEN {age_expr} IS NULL THEN NULL',  # sin fecha de nacimiento no hay categoría por edad (no se supone una)
+             f"WHEN {age_expr} > {ordered[-1]} THEN '{SENIOR_LABEL}'"]
+    for upper, lower in zip(reversed(ordered), reversed(ordered[:-1])):
+        lines.append(f"WHEN {age_expr} > {lower} THEN 'U-{upper}'")
+    lines.append(f"ELSE 'U-{ordered[0]}'")
+    return 'CASE ' + ' '.join(lines) + ' END'
 
 
 def age_on(birth, ref: date) -> Optional[int]:

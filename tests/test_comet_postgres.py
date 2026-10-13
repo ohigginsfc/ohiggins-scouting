@@ -15,7 +15,7 @@ import psycopg
 import pytest
 import streamlit as st
 
-from scouting.comet import alerts as alert_rules, config_store, metrics, queries
+from scouting.comet import alerts as alert_rules, categories, config_store, metrics, queries
 from scouting.comet.facts import build_dataset
 from scouting.comet.ledger import PostgresLedger
 from scouting.comet.pipeline import compute_all
@@ -291,6 +291,30 @@ def test_new_calculations_agree_with_the_existing_comet_dashboard(comet_conn, mo
         assert new_by_match.loc[matchid, 'goals_for'] == old_by_match.loc[matchid, 'goals_for']
         assert new_by_match.loc[matchid, 'goals_against'] == old_by_match.loc[matchid, 'goals_against']
         assert new_by_match.loc[matchid, 'venue'] == old_by_match.loc[matchid, 'venue']
+
+
+def test_old_squad_screen_uses_the_club_sections_with_the_same_rule_as_the_calculation(comet_conn, monkeypatch):
+    """Sub-20, 18, 16, 15, 14, 13, 12 y 11: sin rangos que se solapen y sin categorías que no existen (U-19, U-17)."""
+    conn, _ = comet_conn
+    monkeypatch.syspath_prepend(str(Path('app').resolve()))
+    import comet_dashboard as dashboard
+    for age in range(8, 27):
+        conn.execute("INSERT INTO jugadores (personid, displayname, dateofbirth, nationality, level, status, orgname) "
+                     "VALUES (%s, %s, now() - make_interval(years => %s, days => 3), 'Chile', 'F', 'ACTIVO', %s)",
+                     (7000 + age, f'Edad {age}', age, "O'Higgins"))
+    conn.execute("INSERT INTO jugadores (personid, displayname, dateofbirth, nationality, level, status, orgname) "
+                 "VALUES (7999, 'Sin nacimiento', NULL, 'Chile', 'F', 'ACTIVO', %s)", ("O'Higgins",))
+    squad = _loader(conn)(dashboard.SQUAD_BY_AGE_SQL)
+    mine = squad[squad['personid'] >= 7000].set_index('personid')
+    ladder = categories.build_ladder(categories.DEFAULT_LADDER_CAPS)
+    for age in range(8, 27):
+        assert mine.loc[7000 + age, 'age'] == age
+        assert mine.loc[7000 + age, 'age_category'] == categories.category_for_age(age, ladder), age
+    assert mine.loc[7999, 'age_category'] is None or pd.isna(mine.loc[7999, 'age_category']), 'sin nacimiento no se supone una sección'
+    assert mine.loc[7015, 'age_category'] == 'U-15' and mine.loc[7017, 'age_category'] == 'U-18'
+    assert mine.loc[7020, 'age_category'] == 'U-20' and mine.loc[7021, 'age_category'] == 'Primer Equipo'
+    assert not {'U-19', 'U-17'} & set(mine['age_category'].dropna())
+    assert dashboard.ALL_CATEGORIES_ORDERED == ['Primer Equipo', 'U-20', 'U-18', 'U-16', 'U-15', 'U-14', 'U-13', 'U-12', 'U-11']
 
 
 PAGES = ['page_weekly_match', 'page_rankings', 'page_player', 'page_indicators', 'page_alerts', 'page_adelantados', 'page_tracking']

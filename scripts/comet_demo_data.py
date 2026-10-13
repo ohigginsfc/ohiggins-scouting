@@ -14,7 +14,7 @@ TODAY = pd.Timestamp('2026-09-30')
 
 # categoría -> (tope de edad, duración del partido, partidos por temporada)
 CATEGORIES = {
-    'Primer Equipo': (None, 90, 30), 'U-19': (19, 90, 30), 'U-16': (16, 80, 30),
+    'Primer Equipo': (None, 90, 30), 'U-20': (20, 90, 30), 'U-18': (18, 90, 30), 'U-16': (16, 80, 30),
     'U-15': (15, 80, 30), 'U-14': (14, 70, 30), 'U-13': (13, 70, 30), 'U-12': (12, 60, 26),
 }
 FIRST = ['Matías', 'Benjamín', 'Vicente', 'Martín', 'Joaquín', 'Tomás', 'Agustín', 'Maximiliano', 'Cristóbal',

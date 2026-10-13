@@ -78,7 +78,7 @@ Evolución de minutos por mes o semestre ✅ (solo períodos con partidos; un me
 
 | Requisito | Estado | Detalle |
 |---|---|---|
-| Jugador con 4 amarillas | 🟠 | Alerta con 4 **o más**, dentro de cada competición (ciclo pendiente). Las segundas amarillas se avisan en el detalle pero no se suman |
+| Jugador con 4 amarillas | 🟠 | Alerta con 4 **o más**. Ciclo decidido con Pablo (13-10-2026): **por temporada completa** en las categorías inferiores y **por competición** en el Primer Equipo. Las segundas amarillas se avisan en el detalle pero no se suman (pendiente) |
 | Menos del 20 % de los minutos posibles | 🟠 | Estrictamente menor que 20 %, comparando minutos × 100 con umbral × posibles (1199 de 6000 = 19,98 % alerta; 1200 no), sobre la categoría principal de la temporada. Quien tiene algún partido sin minutos conocidos no se evalúa (se lista aparte) |
 | Jugando en categorías superiores | 🟠 | Con minutos en una categoría superior a la que le corresponde por edad |
 | Más de 2 temporadas sin promoción | 🟠 | 3 o más temporadas seguidas en la misma categoría, según el historial disponible; un hueco de temporadas corta el conteo |
@@ -91,19 +91,31 @@ Evolución de minutos por mes o semestre ✅ (solo períodos con partidos; un me
 Marcas, períodos y reglas se guardan en Supabase y **requieren aplicar la migración 003** (ver más abajo).
 Sin ella las pantallas funcionan con los valores por defecto y en solo lectura.
 
+## Decisiones de la reunión con Pablo (13-10-2026)
+
+| Tema | Qué se decidió | Estado en el portal |
+|---|---|---|
+| Secciones del club | Sub-20, sub-18, sub-16, sub-15, sub-14, sub-13, sub-12 «y así» | ✅ Regla *Secciones del club* (editable: para sumar sub-11, sub-10… se escriben los topes). La categoría por edad es la sub-N más pequeña cuyo tope alcanza (17 y 18 años: sub-18; 19 y 20: sub-20; desde 21: Primer Equipo). Una categoría que COMET trae y no está en la lista se agrega a la escalera. También corrige las pantallas antiguas de COMET (*Estructura del plantel*, *Desarrollo juvenil*), que tenían rangos solapados y no tenían sub-14, sub-18 ni sub-20 |
+| Amarillas | Acumuladas por **temporada completa** en las categorías inferiores y **totales por competición** en el Primer Equipo | ✅ Ciclo «mixto» (por defecto y confirmado). Una categoría que no se reconoce se cuenta por competición. La categoría que muestra la alerta de temporada es la principal (donde sumó más minutos) |
+| Plantel completo | No se puede obtener y **se mantiene como está** | ✅ Confirmado: «no citados» sigue siendo referencial (quienes figuran en otra planilla de la misma competición) |
+| Resultado con el jugador en cancha | Mostrar el resultado **cuando entró y cuando salió**, y **si el resultado cambió** mientras estuvo, en COMET y en Scouting | ⏳ Decidido, sin datos: necesita el minuto de cada gol y cada cambio. En COMET está en `eventos_partido` (el lector del portal no tiene acceso ni se conoce su estructura); en Scouting vendría de los incidentes de Sofascore, que hoy solo se guardan para tarjetas. Mientras tanto, resultado final del partido |
+| Campograma | Dos mapas de posiciones: jugadores chilenos y jugadores extranjeros | Scouting (ver su documentación) |
+| Informes ocultos | Vista preliminar | Scouting (ver su documentación) |
+
 ## Reglas y preguntas pendientes para Pablo
 
 Estas son las siete cosas que el documento pedía confirmar. Cada una tiene un criterio provisional ya aplicado,
 visible en pantalla, y se cambia o se confirma desde *Seguimiento y configuración → Reglas y pendientes*.
+Tras la reunión del 13-10-2026 quedan **confirmadas** la 3 y la parte del ciclo de la 6; la 1 está decidida pero falta el dato.
 
 | # | Pregunta en lenguaje sencillo | Criterio provisional |
 |---|---|---|
-| 1 | Cuando dicen «resultado con el jugador en cancha», ¿es el resultado final del partido en que jugó (aunque haya entrado a los 85') o el marcador mientras estuvo dentro? | Resultado final del partido en que sumó al menos 1 minuto. Lo segundo necesita el minuto de goles y cambios: podría estar en la tabla `eventos_partido`, a la que el lector del portal aún no tiene acceso (falta una revisión autorizada de su contenido) |
+| 1 | ~~Cuando dicen «resultado con el jugador en cancha», ¿es el resultado final o el marcador mientras estuvo dentro?~~ **Decidido (13-10-2026): el resultado cuando entró y cuando salió y si cambió.** Falta el dato: ¿se puede autorizar la lectura de `eventos_partido` y conocer su estructura? | Mientras tanto, resultado final del partido en que sumó al menos 1 minuto. El minuto de goles y cambios podría estar en la tabla `eventos_partido`, a la que el lector del portal aún no tiene acceso (falta una revisión autorizada de su contenido) |
 | 2 | ¿Qué partidos cuentan como «minutos posibles»? ¿Todos los de la serie o solo desde que el jugador llegó? ¿Entran amistosos y copas? ¿Sirve la duración reglamentaria (`matchlength`) o los minutos realmente jugados? ¿Qué estados de partido (`matchstatus`) no cuentan? | Todos los partidos ya jugados de la competición donde el jugador fue citado; duración = el minuto más largo registrado (regla elegible: nominal); sin el dato elegido el partido no cuenta; estados excluidos: ninguno |
-| 3 | ¿De dónde sale la lista oficial del plantel de cada serie para saber quién no fue citado? | Quienes figuran en otra planilla de la misma competición |
+| 3 | ~~¿De dónde sale la lista oficial del plantel de cada serie para saber quién no fue citado?~~ **Respondida (13-10-2026): no se puede obtener y se mantiene como está.** | Confirmada: quienes figuran en otra planilla de la misma competición |
 | 4 | ¿A qué fecha se mide la edad para decir en qué categoría le corresponde jugar a un jugador? ¿Un jugador de 14 años en U-15 es «adelantado»? | 31 de diciembre del año de la temporada; la categoría por edad es la U-N más pequeña cuyo tope alcanza para su edad |
-| 5 | ¿La antigüedad es desde que entró al club? La ficha trae `datefrom` para la mayoría: ¿es la fecha de ingreso? ¿Qué es «promoción»: subir de serie al año siguiente o también jugar partidos en la superior? ¿U-19 y Primer Equipo entran en la alerta? | Antigüedad = desde el primer partido registrado (un mínimo; la regla permite `datefrom`). Promoción = la categoría principal de la temporada es mayor que la del año anterior; Primer Equipo no se evalúa |
-| 6 | ¿Las amarillas se acumulan por campeonato o por temporada? ¿Se borran al cumplir una fecha de suspensión? ¿La segunda amarilla (`secondyellow`) cuenta como una o como dos amarillas? | Por competición; las segundas amarillas se muestran y se avisan, pero no se suman; sin descontar suspensiones |
+| 5 | ¿La antigüedad es desde que entró al club? La ficha trae `datefrom` para la mayoría: ¿es la fecha de ingreso? ¿Qué es «promoción»: subir de serie al año siguiente o también jugar partidos en la superior? ¿U-20 y Primer Equipo entran en la alerta? | Antigüedad = desde el primer partido registrado (un mínimo; la regla permite `datefrom`). Promoción = la categoría principal de la temporada es mayor que la del año anterior; Primer Equipo no se evalúa |
+| 6 | ~~¿Las amarillas se acumulan por campeonato o por temporada?~~ **Decidido (13-10-2026): por temporada completa en las categorías inferiores y por competición en el Primer Equipo.** Siguen abiertas: ¿se borran al cumplir una fecha de suspensión? ¿La segunda amarilla (`secondyellow`) cuenta como una o como dos amarillas? | Ciclo mixto confirmado. Las segundas amarillas se muestran y se avisan, pero no se suman; sin descontar suspensiones (ambas, pendientes) |
 | 7 | ¿Quiénes reciben el resumen semanal, qué día y a qué hora? Incluye nombres de menores: ¿se puede enviar por correo? | Sin destinatarios: no se envía nada |
 
 ## Datos de COMET: qué se usa, qué hay que confirmar y qué falta
@@ -275,10 +287,10 @@ Quedan documentados con su reproducción para decidir cuál sigue (varios depend
 | 2 | **Con la duración «nominal», un partido ya pasado sin planilla ni marcador cuenta como minutos posibles** (con la duración «registrada», la de por defecto, no) | Un partido extra U-15 sin planilla: minutos posibles de P1 pasan de 240 a 320 y su participación de 58,3 % a 43,8 % | Que Pablo elija la fuente de duración y qué estados de partido no cuentan |
 | 3 | **Un jugador citado una sola vez en una serie suma todos los partidos de la serie como minutos posibles** (por defecto), lo que desinfla la participación de la serie | Seis invitados citados una vez en la U-15: participación de la serie de 51,0 % a 20,4 % | Pregunta 2 de Pablo (¿desde que llegó o toda la serie?) y, si se confirma, un mínimo de citaciones para contar como parte de la serie |
 | 4 | **«N temporadas seguidas en U-14» tras un descenso**: la racha cuenta temporadas sin subir de categoría, pero el texto afirma que estuvo todo ese tiempo en la categoría actual | Jugador en U-15 (2024) y U-14 (2025, 2026): «3 temporadas seguidas en U-14 (desde 2024)» | Pregunta 5 de Pablo (qué es «promoción»); mientras tanto, corregir el texto |
-| 5 | **Amarillas con ciclo «por temporada»: la categoría mostrada es la de la última fila de la planilla**, no la principal | P2 (U-15 principal, U-14 secundaria) aparece con categoría U-14 | Mostrar la categoría principal |
+| 5 | ~~**Amarillas con ciclo «por temporada»: la categoría mostrada es la de la última fila de la planilla**, no la principal~~ **Corregido el 13-10-2026:** la alerta de temporada muestra la categoría donde sumó más minutos | P2 (U-15 principal, U-14 secundaria) aparecía con categoría U-14 | — |
 | 6 | **«Adelantados» y «Grupo de edad» comparten jugadores** cuando alguien reparte minutos entre su categoría y la superior | P2 figura en los dos grupos de la categoría por edad U-14 | Decidir si el grupo de comparación debe excluir a los adelantados |
 
 ## Hallazgos que no se tocaron
 
-* `get_squad_by_age_category` (`comet_dashboard.py`) asigna categorías con rangos de edad que se solapan (15 aparece en U-16 y U-15; 14 en U-15 y U-13) y nunca devuelve U-14. Las pantallas nuevas no lo usan; se dejó intacto para no cambiar funciones existentes.
+* ~~`get_squad_by_age_category` (`comet_dashboard.py`) asignaba categorías con rangos de edad que se solapaban y nunca devolvía U-14.~~ **Corregido el 13-10-2026** con las secciones que dio Pablo (sub-20, 18, 16, 15, 14, 13, 12 y 11): ahora usa la misma regla que el cálculo nuevo (`categories.age_category_case_sql`) y una prueba contra PostgreSQL lo comprueba edad por edad. Sigue midiendo la edad el día de hoy, no el 31 de diciembre (pregunta 4, pendiente).
 * Las pantallas nuevas no muestran ni cruzan datos de Sofascore.

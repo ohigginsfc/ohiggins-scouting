@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Mapping, Optional
 
+from .categories import DEFAULT_LADDER_CAPS, parse_ladder
+
 ORIGIN_PABLO = 'pablo'
 ORIGIN_ASSUMED = 'supuesto'
 
@@ -32,6 +34,7 @@ class RuleDef:
     minimum: Optional[int] = None
     maximum: Optional[int] = None
     editable: bool = True
+    decision: Optional[str] = None  # decisión del club que la deja confirmada (quién y cuándo), si ya la hay
 
 
 RULE_DEFS: tuple[RuleDef, ...] = (
@@ -48,6 +51,13 @@ RULE_DEFS: tuple[RuleDef, ...] = (
         'Alerta cuando lleva más de 2 temporadas seguidas en la misma categoría (3 o más).',
         minimum=1, maximum=10),
     RuleDef(
+        'category_ladder', 'Secciones del club (tope de edad de cada sub)', ','.join(str(c) for c in DEFAULT_LADDER_CAPS),
+        ORIGIN_PABLO, 'text',
+        'Sub-20, sub-18, sub-16, sub-15, sub-14, sub-13, sub-12 «y así» (reunión con Pablo, 13-10-2026). Cada sección '
+        'reúne a quienes tienen hasta ese tope de edad y más que la sección menor siguiente (17 y 18 años: sub-18; 19 y 20: '
+        'sub-20). Si COMET trae otra categoría, se agrega a la escalera sin cambiar los topes. Para sumar más secciones hacia '
+        'abajo, escribe los topes separados por coma.'),
+    RuleDef(
         'age_cutoff', 'Fecha de corte de edad (mes-día)', '12-31', ORIGIN_ASSUMED, 'text',
         'La edad se mide el 31 de diciembre del año de la temporada. Cada categoría U-N reúne hasta N años; '
         'la categoría por edad es la más pequeña que alcanza para su edad.',
@@ -56,12 +66,12 @@ RULE_DEFS: tuple[RuleDef, ...] = (
         'se considera adelantado?'),
     RuleDef(
         'min_minutes_on_pitch', 'Minutos mínimos para contar el resultado del partido', 1, ORIGIN_ASSUMED, 'int',
-        'El "resultado con el jugador en cancha" es el resultado final de los partidos en que el jugador '
-        'sumó al menos este número de minutos.',
-        '¿«Resultado con el jugador en cancha» es el resultado final del partido en que jugó (aunque haya entrado '
-        'a los 85 minutos) o el marcador mientras estuvo dentro de la cancha? Lo segundo necesita el minuto de '
-        'cada gol y de cada cambio; podría estar en la tabla de eventos del partido, a la que el portal aún no '
-        'tiene acceso (falta una revisión autorizada de su contenido).',
+        'Pablo definió (13-10-2026) lo que quiere ver: el resultado cuando el jugador entró y cuando salió, y si el '
+        'resultado cambió mientras estuvo en la cancha. Eso necesita el minuto de cada gol y de cada cambio, que COMET '
+        'aún no entrega a este portal. Mientras tanto, el "resultado con el jugador en cancha" es el resultado final de '
+        'los partidos en que el jugador sumó al menos este número de minutos.',
+        'Falta el dato, no la decisión: ¿se puede revisar y autorizar la lectura de la tabla de eventos del partido '
+        '(eventos_partido), con el minuto de goles y cambios? Sin ella solo se puede mostrar el resultado final.',
         minimum=1, maximum=90),
     RuleDef(
         'possible_from_first_call', 'Minutos posibles: contar desde la primera citación', False, ORIGIN_ASSUMED, 'bool',
@@ -92,20 +102,33 @@ RULE_DEFS: tuple[RuleDef, ...] = (
         '¿Los partidos que el jugador se pierde por estar en un microciclo de selección, Sudamericano o Mundial '
         'deben descontarse de sus minutos posibles? Si juega igual en esas fechas, ¿vale el período o vale el partido?'),
     RuleDef(
-        'card_cycle', 'Ciclo de tarjetas amarillas', 'competicion', ORIGIN_ASSUMED, 'choice',
-        'Las amarillas se acumulan dentro de cada competición. Se cuenta la amarilla simple; las segundas amarillas '
-        '(doble amarilla) se muestran aparte y se avisan en la alerta, pero no se suman, y las suspensiones '
-        'cumplidas no se descuentan.',
-        '¿Las amarillas se acumulan por campeonato o por temporada completa? ¿Se borran al cumplir una fecha '
-        'de suspensión? ¿La segunda amarilla (expulsión por doble amarilla) cuenta como una o como dos amarillas?',
-        choices=('competicion', 'temporada')),
+        'card_cycle', 'Ciclo de tarjetas amarillas', 'mixto', ORIGIN_ASSUMED, 'choice',
+        'Mixto (decidido con Pablo, 13-10-2026): en las categorías inferiores las amarillas se acumulan por temporada '
+        'completa; en el Primer Equipo, por competición. Una categoría que no se reconoce se cuenta por competición. '
+        'Las otras dos opciones aplican una sola regla a todas las categorías.',
+        '¿Se mantiene el ciclo mixto (inferiores por temporada, Primer Equipo por competición)?',
+        choices=('mixto', 'competicion', 'temporada'),
+        decision='Reunión con Pablo, 13-10-2026: amarillas acumuladas por temporada completa en las categorías inferiores '
+                 'y totales por competición en el Primer Equipo.'),
+    RuleDef(
+        'second_yellow_rule', 'Segunda amarilla (doble amarilla)', 'no_suma', ORIGIN_ASSUMED, 'text',
+        'Se muestra aparte y se avisa en la alerta, pero no se suma a las amarillas.',
+        '¿La segunda amarilla (expulsión por doble amarilla) cuenta como una amarilla, como dos o no cuenta?',
+        editable=False),
+    RuleDef(
+        'suspensions_rule', 'Suspensiones cumplidas', 'sin_descuento', ORIGIN_ASSUMED, 'text',
+        'Las amarillas no se borran al cumplir una fecha de suspensión: no hay dato de suspensiones en lo que el portal lee.',
+        '¿Las amarillas se borran al cumplir una fecha de suspensión? ¿De dónde sale el dato de las suspensiones?',
+        editable=False),
     RuleDef(
         'roster_rule', '"No citado": cómo se conoce el plantel', 'planillas', ORIGIN_ASSUMED, 'text',
         'Es "no citado" quien figura en la planilla de otro partido de la misma competición, pero no en ésta. '
-        'No se conoce a quien nunca ha sido citado.',
+        'No se conoce a quien nunca ha sido citado: el listado completo del plantel no se puede obtener y se mantiene así '
+        '(Pablo, 13-10-2026).',
         '¿De dónde sale la lista oficial del plantel de cada serie para saber quién no fue citado? Hoy COMET solo '
         'entrega las planillas de los partidos, no el plantel completo.',
-        editable=False),
+        editable=False,
+        decision='Reunión con Pablo, 13-10-2026: el listado del plantel completo no se puede obtener; se mantiene como está.'),
     RuleDef(
         'seniority_rule', 'Antigüedad en el club', 'primer_partido', ORIGIN_ASSUMED, 'choice',
         'Primer partido: años desde el primer partido de O\'Higgins registrado en COMET (es un mínimo: no llega '
@@ -119,7 +142,7 @@ RULE_DEFS: tuple[RuleDef, ...] = (
         'La categoría de una temporada es donde el jugador sumó más minutos. Hay promoción cuando esa '
         'categoría es mayor que la de la temporada anterior. Primer Equipo no se evalúa.',
         '¿Qué es una «promoción»: subir de serie de un año al siguiente, o también jugar partidos en la serie '
-        'superior? ¿Los jugadores de U-19 y de Primer Equipo entran en esta alerta?',
+        'superior? ¿Los jugadores de U-20 y de Primer Equipo entran en esta alerta?',
         editable=False),
     RuleDef(
         'digest_recipients', 'Destinatarios del resumen semanal', [], ORIGIN_ASSUMED, 'list',
@@ -176,6 +199,11 @@ def parse(rule: RuleDef, raw: Any) -> Any:
         except (TypeError, ValueError):
             raise ValueError(f'{rule.label}: usa el formato mes-día, por ejemplo 12-31.') from None
         return f'{month:02d}-{day:02d}'
+    if rule.key == 'category_ladder':
+        try:
+            return ','.join(str(cap) for cap in parse_ladder(raw))
+        except ValueError as exc:
+            raise ValueError(f'{rule.label}: {exc}.') from None
     return str(raw)
 
 
@@ -199,8 +227,11 @@ class Rules:
         return coerce(rule, entry.get('value')) if entry and 'value' in entry else rule.default
 
     def confirmed(self, key: str) -> bool:
+        """Confirmada por el club: lo marcó un administrador, o ya hay una decisión registrada (ver `RuleDef.decision`)."""
         entry = self._stored.get(key) or {}
-        return bool(entry.get('confirmed'))
+        if 'confirmed' in entry:
+            return bool(entry['confirmed'])
+        return RULES_BY_KEY[key].decision is not None
 
     def status(self, key: str) -> str:
         rule = RULES_BY_KEY[key]
@@ -213,6 +244,10 @@ class Rules:
 
     def pending(self) -> list[RuleDef]:
         return [rule for rule in RULE_DEFS if self.is_pending(rule.key)]
+
+    def ladder_caps(self) -> tuple[int, ...]:
+        """Topes de edad de las secciones del club, de mayor a menor (sub-20, sub-18, ...)."""
+        return parse_ladder(self.value('category_ladder'))
 
     def cutoff(self) -> tuple[int, int]:
         month, day = (int(part) for part in self.value('age_cutoff').split('-'))

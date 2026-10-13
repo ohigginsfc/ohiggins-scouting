@@ -112,7 +112,7 @@ def ahead_vs_peers(ds: Dataset, cat_summary: pd.DataFrame, season_year: int) -> 
     """
     cs = cat_summary[(cat_summary['season_year'] == season_year) & (cat_summary['played'] > 0)
                      & ~cat_summary['personid'].isin(left_out_players(ds, season_year))].copy()
-    cs['steps'] = [steps_ahead(c, a, ds.categories) for c, a in zip(cs['category'], cs['age_category'])]
+    cs['steps'] = [steps_ahead(c, a, ds.ladder) for c, a in zip(cs['category'], cs['age_category'])]
     cs['steps'] = pd.to_numeric(cs['steps'], errors='coerce')
     cs['group'] = np.select([cs['steps'] > 0, cs['steps'] == 0], ['Adelantados', 'Grupo de edad'], default='')
     cs = cs[cs['group'] != '']
