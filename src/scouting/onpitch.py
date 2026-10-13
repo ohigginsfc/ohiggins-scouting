@@ -10,6 +10,7 @@ goles no suman el marcador final, el resultado queda **sin dato** (`None`): no s
 from __future__ import annotations
 
 from dataclasses import dataclass
+from numbers import Integral
 from typing import Iterable, Optional, Sequence
 
 LEADING, TIED, TRAILING = 'Ganando', 'Empatando', 'Perdiendo'
@@ -78,10 +79,18 @@ def final_result(score: tuple[int, int]) -> str:
     return WIN if score[0] > score[1] else LOSS if score[0] < score[1] else DRAW
 
 
+def _check_pair(values, label: str) -> None:
+    try:
+        valid = len(values) == 2 and all(isinstance(value, Integral) and not isinstance(value, bool) and value >= 0
+                                       for value in values)
+    except TypeError:
+        valid = False
+    if not valid:
+        raise ValueError(f'{label}: se requieren dos enteros no negativos')
+
+
 def _check_clock(clock: Clock) -> None:
-    minute, added = clock
-    if minute < 0 or added < 0:
-        raise ValueError('el minuto y el descuento no pueden ser negativos')
+    _check_pair(clock, 'minuto y descuento')
 
 
 def _score(goals: Iterable[Goal], keep) -> tuple[int, int]:
@@ -109,6 +118,7 @@ def on_pitch_result(goals: Sequence[Goal], final: Optional[tuple[int, int]], *, 
         raise ValueError('el jugador no puede salir antes de entrar')
     if final is None:
         return None
+    _check_pair(final, 'marcador final')
     goals = list(goals)
     if _score(goals, lambda g: True) != tuple(final):
         return None
@@ -117,6 +127,10 @@ def on_pitch_result(goals: Sequence[Goal], final: Optional[tuple[int, int]], *, 
         goals, (lambda g: g.clock < entered) if inclusive else (lambda g: g.clock <= entered))
     at_exit = tuple(final) if left is None else _score(
         goals, (lambda g: g.clock <= left) if inclusive else (lambda g: g.clock < left))
+    # Con entrada y salida en el mismo instante y goles fuera, el intervalo está
+    # vacío. Ambos marcadores deben coincidir; no puede restarse un gol ya contado.
+    if not inclusive and entered is not None and entered == left:
+        at_exit = at_entry
     return OnPitch(entered=entered, left=left, score_at_entry=at_entry, score_at_exit=at_exit, final_score=tuple(final),
                    goals_for_while_on=at_exit[0] - at_entry[0], goals_against_while_on=at_exit[1] - at_entry[1])
 

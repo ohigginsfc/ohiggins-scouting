@@ -28,6 +28,8 @@ Reglas:
 | Descuento (45+2') | Se ordena dentro de su tiempo: un gol de 45+2 ocurre después de una salida a los 45+1 |
 | Gol en el mismo minuto que su entrada o su salida | **Supuesto sin confirmar:** cuenta con el jugador dentro (`'durante'`). La alternativa (`'fuera'`) está implementada y probada: es solo cambiar el argumento |
 | Salida por expulsión | La salida es el minuto de la roja; la fuente debe indicarlo como salida |
+| Entrada y salida en el mismo minuto, con regla «fuera» | Intervalo vacío: cero goles mientras estuvo y el mismo marcador al entrar y salir |
+| Minuto, descuento o marcador inválidos | Se rechazan valores negativos, fraccionarios o desconocidos; no se calcula con `NaN` |
 
 Ejemplos comprobados a mano: titular que juega todo con 1-0 y 1-1 (empate, no cambió); suplente que entra a los 60' con 0-0 y el equipo termina
 2-0 (cambió a favor); titular que sale a los 55' perdiendo 0-1 porque el rival marcó mientras estaba (cambió en contra, aunque el partido termine 1-1).
