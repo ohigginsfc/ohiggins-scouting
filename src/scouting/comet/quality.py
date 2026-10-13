@@ -135,7 +135,7 @@ def data_quality(ds: Dataset, sheet_raw: pd.DataFrame, matches_raw: pd.DataFrame
            'Ninguno.')
     _check(rows, 'Segundas amarillas registradas', int(f['second_yellows'].fillna(0).sum()), INFO,
            'Tarjetas por doble amarilla (secondyellow): se muestran y se avisan en la alerta, pero no se suman a las amarillas.',
-           'La regla del ciclo de tarjetas está pendiente de confirmar.')
+           'La regla de la segunda amarilla (¿cuenta una, dos o ninguna?) está pendiente de confirmar con Pablo.')
     keeper_matches = set(ds.goalkeepers['matchid'])
     _check(rows, 'Partidos sin arquero registrado', int((~pd.Series(list(with_sheet), dtype=object).isin(keeper_matches)).sum()),
            WARNING, 'Partidos con planilla pero sin fila en actuaciones de arqueros.', 'Sus goles recibidos quedan "sin dato".')

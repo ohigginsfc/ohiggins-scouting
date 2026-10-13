@@ -23,7 +23,8 @@ from ui.theme import OHIGGINS_BLUE, apply_ohiggins_plotly_theme
 THRESHOLD_RULES = {'yellow_cards': 'yellow_threshold', 'low_participation': 'participation_threshold',
                    'no_promotion': 'seasons_without_promotion'}
 QUALITY_COLORS = {'Correcto': 'Verde', 'Aviso': 'Naranja', 'Error': 'Rojo', 'Información': 'Azul'}
-CHOICE_LABELS = {'competicion': 'Por competición', 'temporada': 'Por temporada completa',
+CHOICE_LABELS = {'mixto': 'Mixto: inferiores por temporada, Primer Equipo por competición',
+                 'competicion': 'Por competición', 'temporada': 'Por temporada completa',
                  'registrada': 'Registrada (el minuto más largo jugado)', 'nominal': 'Nominal (duración reglamentaria)',
                  'primer_partido': 'Primer partido registrado', 'datefrom': 'Fecha «datefrom» de la ficha'}
 WEEKDAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']

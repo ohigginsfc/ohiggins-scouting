@@ -110,8 +110,9 @@ def age_category_matrix(ds: Dataset, season_year: int) -> pd.DataFrame:
     f = ds.facts[(ds.facts['season_year'] == season_year) & ds.facts['participated']]
     people = f.drop_duplicates(['personid', 'category'])
     matrix = pd.crosstab(people['age_category'].fillna('Sin fecha de nacimiento'), people['category'])
-    ascending = list(reversed(ds.categories))  # U-12 ... U-19, Primer Equipo; así la diagonal es "juega en la suya"
-    rows = [c for c in ascending if c in matrix.index] + [c for c in matrix.index if c not in ascending]
+    ascending = list(reversed(ds.categories))  # con partidos, de menor a mayor: así la diagonal es "juega en la suya"
+    by_age = list(reversed(ds.ladder or ds.categories))  # secciones del club (sub-11 ... sub-20, Primer Equipo)
+    rows = [c for c in by_age if c in matrix.index] + [c for c in matrix.index if c not in by_age]
     return matrix.reindex(index=rows, columns=[c for c in ascending if c in matrix.columns])
 
 

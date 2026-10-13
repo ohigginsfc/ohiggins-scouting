@@ -24,28 +24,12 @@ OH_GRAY = "#6B7280"
 
 LOGO_PATH = os.path.join(os.path.dirname(__file__), "assets", "OHigginsFC.png")
 
-ALL_CATEGORIES_ORDERED = [
-    "Primer Equipo",
-    "U-19",
-    "U-16",
-    "U-15",
-    "U-14",
-    "U-13",
-    "U-12",
-    "U-11",
-]
-
-YOUTH_CATEGORIES = [
-    "U-19",
-    "U-16",
-    "U-15",
-    "U-14",
-    "U-13",
-    "U-12",
-    "U-11",
-]
-
+from scouting.comet.categories import DEFAULT_LADDER_CAPS, SENIOR_LABEL, age_category_case_sql
 from scouting.portal.security import admin_only, require_admin
+
+# Secciones del club (Pablo, 13-10-2026): sub-20, sub-18, sub-16, sub-15, sub-14, sub-13, sub-12 «y así».
+YOUTH_CATEGORIES = [f"U-{cap}" for cap in DEFAULT_LADDER_CAPS]
+ALL_CATEGORIES_ORDERED = [SENIOR_LABEL] + YOUTH_CATEGORIES
 
 @admin_only
 def get_db_connection():
@@ -278,41 +262,40 @@ def get_match_results_by_category(category: Optional[str] = None) -> pd.DataFram
     return df
 
 
-@admin_only
-@st.cache_data(ttl=600)
-def get_squad_by_age_category() -> pd.DataFrame:
-    query = """
+AGE_SQL = "EXTRACT(YEAR FROM AGE(j.dateofbirth))"
+SQUAD_BY_AGE_SQL = f"""
         SELECT
             j.personid,
             j.displayname,
             j.dateofbirth,
-            EXTRACT(YEAR FROM AGE(j.dateofbirth)) AS age,
+            {AGE_SQL} AS age,
             j.nationality,
             j.level,
             j.status,
-            CASE
-                WHEN EXTRACT(YEAR FROM AGE(j.dateofbirth)) >= 20 THEN 'Primer Equipo'
-                WHEN EXTRACT(YEAR FROM AGE(j.dateofbirth)) = 19 THEN 'U-19'
-                WHEN EXTRACT(YEAR FROM AGE(j.dateofbirth)) IN (17, 18) THEN 'U-19'
-                WHEN EXTRACT(YEAR FROM AGE(j.dateofbirth)) IN (15, 16) THEN 'U-16'
-                WHEN EXTRACT(YEAR FROM AGE(j.dateofbirth)) IN (14, 15) THEN 'U-15'
-                WHEN EXTRACT(YEAR FROM AGE(j.dateofbirth)) IN (13, 14) THEN 'U-13'
-                WHEN EXTRACT(YEAR FROM AGE(j.dateofbirth)) IN (12, 13) THEN 'U-12'
-                WHEN EXTRACT(YEAR FROM AGE(j.dateofbirth)) <= 11 THEN 'U-11'
-                ELSE 'Primer Equipo'
-            END AS age_category
+            {age_category_case_sql(AGE_SQL)} AS age_category
         FROM jugadores j
         WHERE LOWER(j.orgname) LIKE '%higgins%'
           AND j.status = 'ACTIVO'
         ORDER BY age DESC;
     """
-    return load_data(query)
+
+
+@admin_only
+@st.cache_data(ttl=600)
+def get_squad_by_age_category() -> pd.DataFrame:
+    """Plantel por la sección que le corresponde por edad: la sub-N más pequeña cuyo tope alcanza (sub-20, 18, 16, 15, ...).
+
+    La regla es la misma de `scouting.comet.categories.category_for_age`: antes los rangos se solapaban (15 años aparecía
+    en U-16 y U-15, 14 en U-15 y U-13) y no existía U-14, U-18 ni U-20.
+    """
+    return load_data(SQUAD_BY_AGE_SQL)
 
 
 def category_badge(category: str) -> str:
     mapping = {
         "Primer Equipo": "primer",
-        "U-19": "u19",
+        "U-20": "u20",
+        "U-18": "u18",
         "U-16": "u16",
         "U-15": "u15",
         "U-14": "u14",
@@ -320,7 +303,7 @@ def category_badge(category: str) -> str:
         "U-12": "u12",
         "U-11": "u11",
     }
-    cls = mapping.get(category, "u19")
+    cls = mapping.get(category, "u20")
     return f'<span class="category-badge badge-{cls}">{category}</span>'
 
 

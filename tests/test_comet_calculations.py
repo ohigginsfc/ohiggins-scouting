@@ -75,18 +75,24 @@ def test_age_on_respects_birthday_and_cutoff():
 def test_rule_status_never_presents_an_assumption_as_approved():
     rules = Rules()
     assert rules.status('yellow_threshold') == STATUS_REQUESTED
-    assert rules.status('card_cycle') == STATUS_PENDING
-    assert {r.key for r in rules.pending()} == {r.key for r in RULE_DEFS if r.origin == 'supuesto'}
-    approved = Rules({'card_cycle': {'value': 'temporada', 'confirmed': True}})
-    assert approved.status('card_cycle') == STATUS_CONFIRMED and approved.value('card_cycle') == 'temporada'
-    assert approved.status('possible_from_first_call') == STATUS_PENDING
+    # Lo decidido con Pablo (13-10-2026) figura confirmado y deja constancia de quién y cuándo; el resto sigue pendiente.
+    decided = {r.key for r in RULE_DEFS if r.decision}
+    assert decided == {'card_cycle', 'roster_rule'}
+    assert all('13-10-2026' in r.decision for r in RULE_DEFS if r.decision)
+    assert rules.status('card_cycle') == STATUS_CONFIRMED and rules.status('roster_rule') == STATUS_CONFIRMED
+    assert rules.status('second_yellow_rule') == STATUS_PENDING and rules.status('possible_from_first_call') == STATUS_PENDING
+    assert {r.key for r in rules.pending()} == {r.key for r in RULE_DEFS if r.origin == 'supuesto' and r.key not in decided}
+    approved = Rules({'possible_from_first_call': {'value': True, 'confirmed': True}})
+    assert approved.status('possible_from_first_call') == STATUS_CONFIRMED
+    undone = Rules({'card_cycle': {'value': 'mixto', 'confirmed': False}})
+    assert undone.status('card_cycle') == STATUS_PENDING, 'un administrador puede volver a dejarla pendiente'
     assert all(r.question for r in rules.pending() if r.key != 'digest_weekday')
 
 
 def test_invalid_stored_values_fall_back_and_strict_parse_rejects_them():
     rules = Rules({'yellow_threshold': {'value': 'muchas'}, 'card_cycle': {'value': 'otro'},
                    'age_cutoff': {'value': '02-30'}})
-    assert (rules.value('yellow_threshold'), rules.value('card_cycle'), rules.value('age_cutoff')) == (4, 'competicion', '12-31')
+    assert (rules.value('yellow_threshold'), rules.value('card_cycle'), rules.value('age_cutoff')) == (4, 'mixto', '12-31')
     from scouting.comet.rules import RULES_BY_KEY
     for key, bad in [('yellow_threshold', 0), ('yellow_threshold', True), ('participation_threshold', 101),
                      ('age_cutoff', '13-01'), ('digest_recipients', ['sin-arroba']), ('possible_from_first_call', 'si')]:
@@ -352,14 +358,15 @@ def test_alert_default_thresholds_on_tiny_tournament():
 
 
 def test_yellow_card_alert_boundary_and_cycle():
-    rules_2 = Rules({'yellow_threshold': {'value': 2}})
+    by_competition = {'card_cycle': {'value': 'competicion'}}
+    rules_2 = Rules({'yellow_threshold': {'value': 2}, **by_competition})
     ds, _ = dataset(rules_2)
     _, cat = summaries(ds)
     found = alerts.evaluate_alerts(ds, cat, 2026)
     yellow = found[found['alert_key'] == 'yellow_cards']
     assert yellow['personid'].tolist() == ['1'] and yellow['value'].iloc[0] == 2
     assert '2 amarillas en Campeonato U-15 2026' in yellow['detail'].iloc[0]
-    ds3, _ = dataset(Rules({'yellow_threshold': {'value': 3}}))
+    ds3, _ = dataset(Rules({'yellow_threshold': {'value': 3}, **by_competition}))
     assert alerts.evaluate_alerts(ds3, summaries(ds3)[1], 2026).query("alert_key == 'yellow_cards'").empty
 
     # Ciclo por temporada: las amarillas de dos competiciones se suman; por competición no.
@@ -367,11 +374,15 @@ def test_yellow_card_alert_boundary_and_cycle():
                           competition='Copa U-15 2026', season='2026', venue='Local', home_team='O', away_team='R',
                           goals_for=1, goals_against=0, result='Victoria')]
     extra_sheet = [sheet_row(20, 2, True, True, 80, yellow=1, comp=300)]
-    by_comp, _ = dataset(Rules({'yellow_threshold': {'value': 2}}), extra_sheet=extra_sheet, extra_matches=extra_matches)
+    by_comp, _ = dataset(Rules({'yellow_threshold': {'value': 2}, **by_competition}), extra_sheet=extra_sheet, extra_matches=extra_matches)
     by_season, _ = dataset(Rules({'yellow_threshold': {'value': 2}, 'card_cycle': {'value': 'temporada'}}),
                            extra_sheet=extra_sheet, extra_matches=extra_matches)
     assert set(alerts.evaluate_alerts(by_comp, summaries(by_comp)[1], 2026).query("alert_key == 'yellow_cards'")['personid']) == {'1'}
     assert set(alerts.evaluate_alerts(by_season, summaries(by_season)[1], 2026).query("alert_key == 'yellow_cards'")['personid']) == {'1', '2'}
+    # Por defecto (mixto, decidido con Pablo): una categoría inferior acumula por temporada, igual que «temporada».
+    mixed, _ = dataset(Rules({'yellow_threshold': {'value': 2}}), extra_sheet=extra_sheet, extra_matches=extra_matches)
+    found = alerts.evaluate_alerts(mixed, summaries(mixed)[1], 2026).query("alert_key == 'yellow_cards'")
+    assert set(found['personid']) == {'1', '2'} and 'la temporada 2026' in found['detail'].iloc[0]
 
 
 def test_participation_alert_is_strictly_below_threshold():

@@ -7,6 +7,7 @@ from typing import Any, Mapping, Optional
 
 import pandas as pd
 
+from .categories import SENIOR_RANK
 from .facts import Dataset
 from .metrics import principal_categories, seasons_without_promotion
 
@@ -70,20 +71,46 @@ def _empty() -> pd.DataFrame:
     return pd.DataFrame(columns=['alert_key', 'personid', 'displayname', 'category', 'value', 'detail'])
 
 
+def _sum_or_nan(series: pd.Series):
+    return series.sum(min_count=1)
+
+
 def _yellow_cards(ds: Dataset, season_year: int) -> pd.DataFrame:
+    """Alerta de amarillas. El ciclo depende de la categoría (decisión con Pablo, 13-10-2026): por temporada completa en
+    las categorías inferiores y por competición en el Primer Equipo («mixto»); las otras reglas aplican una sola a todos."""
     f = ds.facts[ds.facts['season_year'] == season_year]
     threshold = ds.rules.value('yellow_threshold')
-    per_competition = ds.rules.value('card_cycle') == 'competicion'
-    keys = ['personid', 'competition_id'] if per_competition else ['personid']
-    grouped = f.groupby(keys, as_index=False).agg(
-        displayname=('displayname', 'first'), category=('category', 'last'),
-        competition=('competition', 'first'), value=('yellow_cards', lambda s: s.sum(min_count=1)),
-        second=('second_yellows', lambda s: s.sum(min_count=1)))
-    hit = grouped[grouped['value'] >= threshold].copy()
+    cycle = ds.rules.value('card_cycle')
+    youth = f['category_rank'].fillna(SENIOR_RANK) < SENIOR_RANK   # categoría inferior reconocida (sub-N)
+    per_competition_rows = {'competicion': pd.Series(True, index=f.index), 'temporada': pd.Series(False, index=f.index),
+                            'mixto': ~youth}[cycle]
+    parts = []
+    by_competition = f[per_competition_rows]
+    if len(by_competition):
+        grouped = by_competition.groupby(['personid', 'competition_id'], as_index=False).agg(
+            displayname=('displayname', 'first'), category=('category', 'first'), competition=('competition', 'first'),
+            value=('yellow_cards', _sum_or_nan), second=('second_yellows', _sum_or_nan))
+        parts.append(grouped.assign(scope=grouped['competition']))
+    by_season = f[~per_competition_rows]
+    if len(by_season):
+        grouped = by_season.groupby('personid', as_index=False).agg(
+            displayname=('displayname', 'first'), value=('yellow_cards', _sum_or_nan), second=('second_yellows', _sum_or_nan))
+        # Categoría que se muestra: donde sumó más minutos esa temporada (la última fila de la planilla no dice nada).
+        summary = by_season.groupby(['personid', 'category'], as_index=False).agg(
+            minutes=('minutes', _sum_or_nan), cited=('matchid', 'nunique'),
+            category_rank=('category_rank', 'first'), minutes_missing=('minutes_unknown', 'sum'))
+        summary['season_year'] = season_year
+        main = principal_categories(summary).set_index('personid')['category']
+        grouped['category'] = grouped['personid'].map(main).fillna('Sin dato')
+        grouped['scope'] = f'la temporada {season_year}'
+        parts.append(grouped)
+    if not parts:
+        return _empty()
+    hit = pd.concat(parts, ignore_index=True)
+    hit = hit[hit['value'] >= threshold].copy()
     if hit.empty:
         return _empty()
-    scope = hit['competition'] if per_competition else f'temporada {season_year}'
-    hit['detail'] = hit['value'].astype(int).astype(str) + ' amarillas en ' + scope
+    hit['detail'] = hit['value'].astype(int).astype(str) + ' amarillas en ' + hit['scope']
     seconds = hit['second'].fillna(0).astype(int)
     hit.loc[seconds > 0, 'detail'] += ' (+' + seconds.astype(str) + ' segunda amarilla, no sumada)'
     return hit[['personid', 'displayname', 'category', 'value', 'detail']].assign(alert_key='yellow_cards')

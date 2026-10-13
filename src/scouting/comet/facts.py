@@ -11,7 +11,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .categories import category_for_age, order_categories, parse_category, steps_ahead, years_younger
+from .categories import (build_ladder, category_for_age, order_categories, parse_category, steps_ahead,
+                         years_younger)
 from .rules import Rules
 
 LOCAL_TZ = 'America/Santiago'
@@ -208,9 +209,10 @@ class Dataset:
     players: pd.DataFrame
     facts: pd.DataFrame
     goalkeepers: pd.DataFrame
-    categories: tuple  # categorías reconocidas, de mayor a menor
+    categories: tuple  # categorías reconocidas con partidos, de mayor a menor
     rules: Rules
     duplicates: pd.DataFrame = None  # filas repetidas jugador/partido y cómo se resolvieron
+    ladder: tuple = ()  # secciones oficiales del club más las que traen los datos: sirve para la categoría por edad
 
     @property
     def seasons(self) -> list:
@@ -270,6 +272,7 @@ def build_dataset(sheet_raw, matches_raw, players_raw, goalkeepers_raw, rules: R
     sheet, sheet_dups = reconcile_duplicates(prepare_sheet(sheet_raw), SHEET_VALUES, 'planilla')
     keepers, keeper_dups = reconcile_duplicates(prepare_goalkeepers(goalkeepers_raw), KEEPER_VALUES, 'arquero')
     categories = tuple(order_categories(matches['category']))
+    ladder = tuple(build_ladder(rules.ladder_caps(), matches['category']))
 
     # La competición de cada fila es la del partido: es única y evita que dos planillas discrepen.
     f = sheet.drop(columns='competition_id').merge(
@@ -296,10 +299,13 @@ def build_dataset(sheet_raw, matches_raw, players_raw, goalkeepers_raw, rules: R
     birth = f['dateofbirth']
     before_cutoff = (birth.dt.month * 100 + birth.dt.day) > (cutoff_month * 100 + cutoff_day)
     f['age'] = f['season_year'] - birth.dt.year - before_cutoff.astype(float)
-    ages = {a: category_for_age(a, categories) for a in f['age'].dropna().unique()}
+    # Las categorías históricas se conservan para comparar dónde jugó, pero no
+    # sustituyen las secciones que el club configuró para la categoría por edad.
+    age_ladder = build_ladder(rules.ladder_caps())
+    ages = {a: category_for_age(a, age_ladder) for a in f['age'].dropna().unique()}
     f['age_category'] = f['age'].map(ages)
     pairs = f[['category', 'age_category']].drop_duplicates()
-    ahead = {(a, b): steps_ahead(a, b, categories) for a, b in zip(pairs['category'], pairs['age_category'])}
+    ahead = {(a, b): steps_ahead(a, b, ladder) for a, b in zip(pairs['category'], pairs['age_category'])}
     f['steps_ahead'] = [ahead.get((a, b)) for a, b in zip(f['category'], f['age_category'])]
     f['steps_ahead'] = pd.to_numeric(f['steps_ahead'], errors='coerce')
     f['years_younger'] = [years_younger(a, c) for a, c in zip(f['age'], f['category'])]
@@ -314,4 +320,4 @@ def build_dataset(sheet_raw, matches_raw, players_raw, goalkeepers_raw, rules: R
 
     duplicates = pd.concat([sheet_dups, keeper_dups], ignore_index=True)
     return Dataset(matches=matches, players=players, facts=f.reset_index(drop=True),
-                   goalkeepers=keepers, categories=categories, rules=rules, duplicates=duplicates)
+                   goalkeepers=keepers, categories=categories, rules=rules, duplicates=duplicates, ladder=ladder)

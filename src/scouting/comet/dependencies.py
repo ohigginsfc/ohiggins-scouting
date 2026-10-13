@@ -20,13 +20,16 @@ PIPELINE_DEPENDENCIES: tuple[dict, ...] = (
     dict(estado=MISSING,
          dato='Plantel oficial de cada categoría y temporada (quién pertenece a cada serie)',
          para='Jugadores no citados que no participaron; minutos posibles exactos',
-         hoy='Referencial: quienes figuran en otra planilla de la misma competición.'),
+         hoy='Pablo confirmó (13-10-2026) que el listado del plantel completo no se puede obtener y se mantiene como '
+             'está: referencial, con quienes figuran en otra planilla de la misma competición.'),
     dict(estado=NO_ACCESS,
          dato='Cronología del partido (minuto de goles, tarjetas y cambios): tabla eventos_partido',
-         para='Resultado con el jugador en cancha entendido como el marcador mientras jugó',
-         hoy='La tabla existe, pero el lector del portal no tiene SELECT sobre ella y no se comprobó su contenido. '
-             'No se concedieron permisos: falta una inspección autorizada de su calidad y cobertura. Mientras tanto, '
-             'resultado final del partido en que el jugador sumó el mínimo de minutos.'),
+         para='Resultado cuando el jugador entró y cuando salió, y si el resultado cambió mientras estuvo en la cancha '
+              '(lo que pidió Pablo el 13-10-2026)',
+         hoy='La tabla existe, pero el lector del portal no tiene SELECT sobre ella y no se comprobó su contenido ni su '
+             'estructura. No se concedieron permisos: falta una inspección autorizada de su calidad y cobertura y '
+             'el visto bueno del propietario de la base. Mientras tanto, resultado final del partido en que el jugador '
+             'sumó el mínimo de minutos.'),
     dict(estado=TO_CONFIRM,
          dato='Fecha «datefrom» de la ficha del jugador',
          para='Antigüedad en el club',
