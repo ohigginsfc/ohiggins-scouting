@@ -76,11 +76,11 @@ Para ampliar la cobertura:
 
 1. En COMET Data Platform, revisar el informe **Eventos de partido**: solicitar
    eventos de **ambos equipos en los partidos de O'Higgins**, manteniendo el ámbito
-   de partidos y temporadas del club. El importador de `dataProject` conserva los
+   de partidos y temporadas del club. El importador del repo unificado conserva los
    equipos recibidos; no elimina goles rivales.
 2. Si cambia el enlace del informe, actualizar privadamente `LINK` en la pestaña
-   `ENDPOINTS` de la hoja configurada en `dataProject`; no publicar su `API_KEY`.
-3. Ejecutar la sincronización COMET existente y contrastar otra vez goles y
+   `ENDPOINTS` de la hoja configurada en el worker COMET; no publicar su `API_KEY`.
+3. Ejecutar la [sincronización COMET](comet-synchronization.md) y contrastar otra vez goles y
    marcador final, además de la cobertura de cambios. Revisar los catálogos de
    equipos, competidores y personas para respetar las relaciones del importador.
 4. Si el informe no permite esa cobertura, COMET documenta una API de exportación

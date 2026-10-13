@@ -1,0 +1,6 @@
+# Worker COMET: instalación independiente del portal y de Selenium/Sofascore.
+pandas==2.2.3
+requests>=2.32,<3
+python-dotenv==1.0.1
+gspread>=6.1,<7
+google-auth>=2.30,<3
