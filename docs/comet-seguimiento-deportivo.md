@@ -46,7 +46,7 @@ Estado: ✅ implementado · 🟠 implementado con una regla provisional (pendien
 | Goles y tarjetas amarillas / rojas | ✅ | Columnas por jugador, más *2.ª amarilla* (`secondyellow`) y *Autogoles* (`owngoals`), que existen en COMET y se muestran aparte |
 | Goles recibidos por arquero | ✅ | Bloque *Goles recibidos por arquero* |
 | Filas repetidas jugador/partido | ✅ | Idénticas: se cuenta una. Contradictorias: no se elige ninguna, el partido lo avisa y el jugador queda con cifras incompletas |
-| Resultado con el jugador en cancha | 🟠 | Resultado final del partido en que el jugador sumó al menos el mínimo de minutos (por defecto 1) |
+| Resultado con el jugador en cancha | ✅ con cobertura parcial | Marcador y estado al entrar y salir, cambio de resultado y goles durante el intervalo. Solo se calcula con cronología completa y validada; si falta queda sin dato. Ver [contrato y goles rivales](resultado-con-jugador-en-cancha.md) |
 
 ### Ranking por categoría
 
@@ -100,7 +100,7 @@ Sin ella las pantallas funcionan con los valores por defecto y en solo lectura.
 | Secciones del club | Sub-20, sub-18, sub-16, sub-15, sub-14, sub-13, sub-12 «y así» | ✅ Regla *Secciones del club* (editable: para sumar sub-11, sub-10… se escriben los topes). La categoría por edad es la sub-N más pequeña cuyo tope alcanza (17 y 18 años: sub-18; 19 y 20: sub-20; desde 21: Primer Equipo). Una categoría que COMET trae y no está en la lista se agrega a la escalera. También corrige las pantallas antiguas de COMET (*Estructura del plantel*, *Desarrollo juvenil*), que tenían rangos solapados y no tenían sub-14, sub-18 ni sub-20 |
 | Amarillas | Acumuladas por **temporada completa** en las categorías inferiores y **totales por competición** en el Primer Equipo | ✅ Ciclo «mixto» (por defecto y confirmado). Una categoría que no se reconoce se cuenta por competición. La categoría que muestra la alerta de temporada es la principal (donde sumó más minutos) |
 | Plantel completo | No se puede obtener y **se mantiene como está** | ✅ Confirmado: «no citados» sigue siendo referencial (quienes figuran en otra planilla de la misma competición) |
-| Resultado con el jugador en cancha | Mostrar el resultado **cuando entró y cuando salió**, y **si el resultado cambió** mientras estuvo, en COMET y en Scouting | ⏳ Decidido, sin datos: necesita el minuto de cada gol y cada cambio. En COMET está en `eventos_partido` (el lector del portal no tiene acceso ni se conoce su estructura); en Scouting vendría de los incidentes de Sofascore, que hoy solo se guardan para tarjetas. Mientras tanto, resultado final del partido |
+| Resultado con el jugador en cancha | Mostrar el resultado **cuando entró y cuando salió**, y **si el resultado cambió**, en COMET y en Scouting | COMET: conectado a Partido semanal y Ficha del jugador, condicionado a cronología completa. Falta ampliar goles rivales en la fuente. Scouting: integración pendiente; ver [detalle](resultado-con-jugador-en-cancha.md) |
 | Campograma | Dos mapas de posiciones: jugadores chilenos y jugadores extranjeros | Scouting (ver su documentación) |
 | Informes ocultos | Vista preliminar | Scouting (ver su documentación) |
 
@@ -112,7 +112,7 @@ Tras la reunión del 13-10-2026 quedan **confirmadas** la 3 y la parte del ciclo
 
 | # | Pregunta en lenguaje sencillo | Criterio provisional |
 |---|---|---|
-| 1 | ~~Cuando dicen «resultado con el jugador en cancha», ¿es el resultado final o el marcador mientras estuvo dentro?~~ **Decidido (13-10-2026): el resultado cuando entró y cuando salió y si cambió.** Falta el dato: ¿se puede autorizar la lectura de `eventos_partido` y conocer su estructura? | Mientras tanto, resultado final del partido en que sumó al menos 1 minuto. El minuto de goles y cambios podría estar en la tabla `eventos_partido`, a la que el lector del portal aún no tiene acceso (falta una revisión autorizada de su contenido) |
+| 1 | **Decidido (13-10-2026): resultado cuando entró y salió y si cambió.** Queda por confirmar cómo tratar gol y cambio en el mismo minuto. | Integración COMET con eventos reales; por defecto el gol del mismo minuto cuenta dentro. Si faltan goles/cambios se muestra sin dato; el resultado final queda separado |
 | 2 | ¿Qué partidos cuentan como «minutos posibles»? ¿Todos los de la serie o solo desde que el jugador llegó? ¿Entran amistosos y copas? ¿Sirve la duración reglamentaria (`matchlength`) o los minutos realmente jugados? ¿Qué estados de partido (`matchstatus`) no cuentan? | Todos los partidos ya jugados de la competición donde el jugador fue citado; duración = el minuto más largo registrado (regla elegible: nominal); sin el dato elegido el partido no cuenta; estados excluidos: ninguno |
 | 3 | ~~¿De dónde sale la lista oficial del plantel de cada serie para saber quién no fue citado?~~ **Respondida (13-10-2026): no se puede obtener y se mantiene como está.** | Confirmada: quienes figuran en otra planilla de la misma competición |
 | 4 | ¿A qué fecha se mide la edad para decir en qué categoría le corresponde jugar a un jugador? ¿Un jugador de 14 años en U-15 es «adelantado»? | 31 de diciembre del año de la temporada; la categoría por edad es la U-N más pequeña cuyo tope alcanza para su edad |
@@ -122,14 +122,14 @@ Tras la reunión del 13-10-2026 quedan **confirmadas** la 3 y la parte del ciclo
 
 ## Datos de COMET: qué se usa, qué hay que confirmar y qué falta
 
-No se modifica `dataProject` ni se conceden permisos. Esta tabla también está en *Seguimiento y configuración → Calidad de datos y dependencias*.
+No se modifica `dataProject`. La migración 004 amplía explícitamente la lectura del rol COMET; no hay permisos nuevos para scout. Esta tabla también está en *Seguimiento y configuración → Calidad de datos y dependencias*.
 Ninguna fila dice que un dato «falta» sin haberlo comprobado: un dato sin acceso no es un dato ausente.
 
 | Dato | Estado | Para qué | Qué se hace hoy |
 |---|---|---|---|
 | Citación completa (con suplentes que no ingresaron) | No disponible en los datos leídos | Suplentes que no ingresaron, «solo citación» | Se usan las filas marcadas como que no jugaron; si no vienen, quedan vacías y el control de calidad lo avisa |
 | Plantel oficial por categoría y temporada | No disponible en los datos leídos | No citados; minutos posibles exactos | Referencial por planillas |
-| Cronología del partido: tabla `eventos_partido` | Sin acceso del lector del portal | Marcador mientras el jugador estuvo en cancha | La tabla existe; no se comprobó su contenido ni se concedieron permisos. Falta una inspección autorizada. Mientras tanto, resultado final del partido |
+| Cronología del partido: tabla `eventos_partido` | En uso con cobertura parcial; requiere migración 004 | Marcador mientras el jugador estuvo en cancha | Se lee y valida contra el marcador final. El export disponible no trae goleadores rivales: ampliar el informe de origen. Los intervalos incompletos quedan sin dato |
 | `jugadores.datefrom` | Existe: significado por confirmar | Antigüedad en el club | La mayoría de las fichas la trae. Por defecto la antigüedad cuenta desde el primer partido; la regla permite `datefrom` (sin dato si falta, sin sustituirla) |
 | Historial de categorías anterior al primer año leído | No disponible en los datos leídos | Temporadas sin promoción | La muestra leída llega a 2025-2026: la alerta no puede certificarse con ese horizonte |
 | `competiciones.matchlength` y `partidos.matchstatus` | Existe: significado por confirmar | Minutos posibles | Se leen. Duración registrada y nominal difieren en algunos partidos y ninguna es «la correcta» por sí sola: una regla elige la fuente y otra excluye estados. Falta contrastar con el club |

@@ -375,6 +375,43 @@ def test_comet_reader_role_can_run_every_new_query_and_cannot_write():
 
 # --- Migración 003 y persistencia ------------------------------------------------------------------------------
 
+
+def test_events_migration_is_idempotent_scoped_read_only_and_query_preserves_opponent_goals(comet_conn):
+    conn, _ = comet_conn
+    conn.execute('CREATE TABLE public.eventos_partido (uid int, matchid bigint, personid bigint, '
+                 'secondpersonid bigint, teamid int, matcheventtype text, phase text, '
+                 'displayminute text, stoppagetime int, secondyellowcard boolean)')
+    conn.execute('ALTER TABLE public.eventos_partido ENABLE ROW LEVEL SECURITY')
+    # Own home/away matches, a future own match, and a wholly unrelated match.
+    conn.execute("INSERT INTO eventos_partido VALUES "
+                 "(1,1,1,NULL,40010,'Gol','Primer tiempo','15',0,false),"
+                 "(2,1,99,NULL,1,'Gol','Segundo tiempo','65',0,false),"
+                 "(3,2,99,NULL,2,'Gol','Segundo tiempo','65',0,false),"
+                 "(4,90,1,NULL,40010,'Gol','Primer tiempo','15',0,false),"
+                 "(5,91,99,NULL,1,'Gol','Primer tiempo','15',0,false)")
+    for role in ('scouting_runtime', 'anon', 'authenticated'):
+        if not conn.execute('SELECT 1 FROM pg_roles WHERE rolname=%s', (role,)).fetchone():
+            conn.execute(psycopg.sql.SQL('CREATE ROLE {}').format(psycopg.sql.Identifier(role)))
+    for table in DDL:
+        conn.execute(psycopg.sql.SQL('ALTER TABLE {} ENABLE ROW LEVEL SECURITY').format(psycopg.sql.Identifier(table)))
+    for filename in ('002_comet_reader.sql', '004_comet_events_reader.sql', '004_comet_events_reader.sql'):
+        sql = Path('db/portal', filename).read_text(encoding='utf8')
+        conn.execute(sql.replace('BEGIN;', '').replace('COMMIT;', ''))
+    assert conn.execute("SELECT count(*) FROM pg_policies WHERE tablename='eventos_partido'").fetchone()[0] == 1
+    for role in ('scouting_runtime', 'anon', 'authenticated'):
+        assert not conn.execute("SELECT has_table_privilege(%s,'public.eventos_partido','SELECT')", (role,)).fetchone()[0]
+    conn.execute('SET LOCAL ROLE comet_reader')
+    # RLS admits only matches involving the club, including goals by rivals.
+    assert conn.execute('SELECT uid FROM eventos_partido ORDER BY uid').fetchall() == [(1,), (2,), (3,), (4,)]
+    raw = queries.fetch_raw(_loader(conn))
+    assert set(raw['events']['uid']) == {1, 2, 3}, 'future and unrelated games excluded by reader query'
+    assert list(raw['events'].sort_values('uid')['side']) == ['for', 'against', 'against']
+    for privilege in ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'):
+        assert not conn.execute("SELECT has_table_privilege(current_user,'public.eventos_partido',%s)", (privilege,)).fetchone()[0]
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        conn.execute("INSERT INTO eventos_partido(uid) VALUES(8)")
+    conn.rollback()
+
 @pytest.fixture
 def portal_db(monkeypatch):
     dsn = _dsn()

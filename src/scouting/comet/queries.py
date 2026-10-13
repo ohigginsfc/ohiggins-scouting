@@ -24,7 +24,7 @@ COLUMNS_SQL = """
     SELECT table_name, column_name
     FROM information_schema.columns
     WHERE table_schema = 'public'
-      AND table_name IN ('actuaciones_jugadores', 'actuaciones_arqueros', 'competiciones', 'jugadores', 'partidos')
+      AND table_name IN ('actuaciones_jugadores', 'actuaciones_arqueros', 'competiciones', 'jugadores', 'partidos', 'eventos_partido')
 """
 
 _SHEET = """
@@ -40,6 +40,30 @@ GOALKEEPERS_SQL = """
     FROM actuaciones_arqueros a
     WHERE a.clubid = %(club)s
 """
+
+# Ambos equipos, pero únicamente en partidos de O'Higgins ya jugados. No se filtra
+# e.teamid por club: hacerlo perdería los goles rivales si el informe los entrega.
+EVENT_COLUMNS = ('uid', 'matchid', 'personid', 'secondpersonid', 'matcheventtype',
+                 'phase', 'displayminute', 'stoppagetime', 'side', 'secondyellowcard')
+EVENT_REQUIRED = {'uid', 'matchid', 'personid', 'secondpersonid', 'teamid',
+                  'matcheventtype', 'phase', 'displayminute', 'stoppagetime'}
+_EVENTS = """
+    SELECT e.uid, e.matchid, e.personid, e.secondpersonid, e.matcheventtype,
+           e.phase, e.displayminute, e.stoppagetime,
+           CASE WHEN e.teamid = %(club)s THEN 'for'
+                WHEN e.teamid IN (p.hometeam, p.awayteam) THEN 'against'
+                ELSE NULL END AS side, {secondyellow} AS secondyellowcard
+    FROM public.eventos_partido e
+    JOIN public.partidos p ON p.matchid = e.matchid
+    WHERE (p.hometeam = %(club)s OR p.awayteam = %(club)s)
+      AND p.matchdate IS NOT NULL AND p.matchdate < NOW()
+"""
+
+
+def events_sql(columns: set) -> str | None:
+    if not EVENT_REQUIRED <= {name for table, name in columns if table == 'eventos_partido'}:
+        return None
+    return _EVENTS.format(secondyellow='e.secondyellowcard' if ('eventos_partido', 'secondyellowcard') in columns else 'NULL::boolean')
 
 # Misma definición de resultado que get_match_results_by_category: el marcador final es el de la
 # fase 'Segundo tiempo'. Sin marcador el resultado queda NULL (no se cuenta como derrota ni empate).
@@ -136,5 +160,11 @@ def fetch_raw(load: Loader) -> dict:
     """Ejecuta las consultas con `load(sql, params)` y devuelve los datos sin procesar."""
     params = {'club': OHIGGINS_CLUB_ID}
     columns = available_columns(load)
-    return dict(sheet=load(sheet_sql(columns), params), matches=load(matches_sql(columns), params),
-                players=load(players_sql(columns), params), goalkeepers=load(GOALKEEPERS_SQL, params))
+    raw = dict(sheet=load(sheet_sql(columns), params), matches=load(matches_sql(columns), params),
+               players=load(players_sql(columns), params), goalkeepers=load(GOALKEEPERS_SQL, params))
+    sql = events_sql(columns)
+    if sql is not None:
+        # El despliegue puede preceder a la migración 004. Los datos deportivos
+        # siguen disponibles y el resultado en cancha se muestra sin dato.
+        raw['events'] = load(sql, params)
+    return raw

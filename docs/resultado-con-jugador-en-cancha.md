@@ -1,80 +1,100 @@
-# Resultado con el jugador en la cancha (COMET y Scouting)
+# Resultado con el jugador en cancha
 
-Pedido de Pablo en la reunión del 13-10-2026, para **los dos módulos**: no basta el resultado final del partido en que el jugador
-jugó. Hay que mostrar **cuál era el marcador cuando entró y cuando salió, y si el resultado se modificó** mientras estuvo en la cancha.
+## COMET: uso en el portal
 
-> **Estado:** el cálculo está hecho y probado (`src/scouting/onpitch.py`). **Ninguna pantalla lo usa todavía**, porque ninguna de las dos
-> fuentes entrega hoy los datos que necesita. Este documento dice cuáles son, dónde están y qué hay que decidir o autorizar.
+Solo **Admin**. En **Partido semanal** y **Ficha del jugador → Partidos** se muestran:
 
-## Cómo se calcula
+- Entró / Salió: inicio, final o minuto absoluto, incluido el descuento.
+- Marcador y estado al entrar y al salir: ganando, empatando o perdiendo.
+- ¿Cambió el resultado?: compara el estado a la entrada con el estado a la salida.
+- Goles a favor y en contra durante ese intervalo.
+- Cronología: calculado o motivo del dato ausente.
 
-`scouting.onpitch.on_pitch_result(goals, final, entered=None, left=None, same_minute='durante')` recibe:
+El marcador final permanece separado. Un cambio transitorio que acaba en el mismo
+estado no se marca como cambio entre entrada y salida. Los rankings y porcentajes
+históricos de victorias siguen usando el **resultado final de partidos jugados**;
+no son rankings derivados de esta cronología.
 
-* los **goles del partido con su minuto** y el equipo al que suman (un autogol del rival suma a favor);
-* el **marcador final**: los goles deben sumarlo exactamente;
-* el **minuto de entrada** (nada si fue titular) y el **minuto de salida** (nada si siguió hasta el final).
+## Lectura y despliegue
 
-Devuelve el marcador al entrar y al salir, los goles a favor y en contra mientras estuvo, si el resultado (*ganando / empatando / perdiendo*)
-cambió entre una cosa y otra, y el resultado final aparte. `describe()` lo escribe en una frase:
+Después de `db/portal/002_comet_reader.sql`, el propietario de PostgreSQL aplica
+explícitamente [004_comet_events_reader.sql](../db/portal/004_comet_events_reader.sql).
+Es idempotente y concede exclusivamente `SELECT` a `comet_reader`, con una política
+RLS para eventos de partidos de O'Higgins. Conserva las políticas y el estado de RLS
+previos; aborta si la tabla no tiene RLS habilitado. No concede permisos a Scout ni
+a otros roles, no modifica datos deportivos.
 
-> Entró a los 60' con 0-0 (empatando); terminó el partido con 2-0 (ganando): el resultado cambió mientras estuvo en la cancha
+El administrador del servidor actualiza el portal siguiendo
+[el manual de despliegue](unified-portal.md). No hay cambio de contraseña ni de
+`.env.portal`. La aplicación no ejecuta la migración al arrancar. La caché de datos
+caduca a los 10 minutos; reconstruir el portal renueva el proceso.
 
-Reglas:
+Si la tabla o sus columnas no son visibles para el lector, el portal conserva las
+otras funciones y muestra «Eventos no disponibles». Scout no puede consultar COMET,
+incluidos los datos que Admin ya cargó en caché.
 
-| Caso | Qué hace |
+## Contrato del export COMET
+
+`scouting.comet.events` adapta `eventos_partido` al cálculo probado
+`scouting.onpitch.on_pitch_result`:
+
+| Dato | Interpretación |
 |---|---|
-| Los goles no suman el marcador final, o falta el marcador | **Sin dato** (`None`): la cronología está incompleta o se contradice. No se reemplaza por el resultado final ni se inventa un gol |
-| 0-0 sin goles | Es una cronología completa: el resultado no cambió |
-| Descuento (45+2') | Se ordena dentro de su tiempo: un gol de 45+2 ocurre después de una salida a los 45+1 |
-| Gol en el mismo minuto que su entrada o su salida | **Supuesto sin confirmar:** cuenta con el jugador dentro (`'durante'`). La alternativa (`'fuera'`) está implementada y probada: es solo cambiar el argumento |
-| Salida por expulsión | La salida es el minuto de la roja; la fuente debe indicarlo como salida |
-| Entrada y salida en el mismo minuto, con regla «fuera» | Intervalo vacío: cero goles mientras estuvo y el mismo marcador al entrar y salir |
-| Minuto, descuento o marcador inválidos | Se rechazan valores negativos, fraccionarios o desconocidos; no se calcula con `NaN` |
+| `uid` | Identificador del evento: duplicados idénticos cuentan una vez; versiones diferentes invalidan el partido |
+| `matcheventtype` | `Gol` y `Penal` suman al equipo del evento; `Autogol` suma al contrario; tanda y penales fallados se excluyen |
+| `teamid` | Se valida contra ambos equipos del partido; la consulta conserva los goles rivales |
+| `displayminute` y `stoppagetime` | Reloj absoluto: `41'` en una serie de tiempos de 40 minutos, `45'+2'` en descuento |
+| `minute` | Se reinicia en cada tiempo: no sirve directamente como reloj absoluto |
+| Sustitución | `personid` entra; `secondpersonid` sale |
+| Roja / expulsión / segunda amarilla | Termina el intervalo si ocurre mientras está dentro; una tarjeta posterior a su salida no lo hace |
 
-Ejemplos comprobados a mano: titular que juega todo con 1-0 y 1-1 (empate, no cambió); suplente que entra a los 60' con 0-0 y el equipo termina
-2-0 (cambió a favor); titular que sale a los 55' perdiendo 0-1 porque el rival marcó mientras estaba (cambió en contra, aunque el partido termine 1-1).
+No se deduce el minuto de un cambio a partir del total de minutos jugados. Para
+confirmar que alguien siguió hasta el final se contrastan sus minutos con la
+duración nominal y registrada; una discrepancia deja el dato ausente. Reentradas,
+cambios contradictorios, titularidad desconocida y goles sin reloj no se inventan.
 
-## Qué datos necesita cada fuente
+**Regla provisional:** un gol en el mismo minuto que entrada/salida cuenta con el
+jugador dentro. No hay segundos para ordenar esos eventos; la pantalla lo indica.
+Un suplente sin participar no recibe un supuesto 0-0.
 
-| Dato | COMET | Scouting (Sofascore) |
-|---|---|---|
-| Marcador final | ✅ Ya se lee: fase «Segundo tiempo» de `partidos_fases` | ✅ Ya está: el calendario trae el marcador final de cada partido |
-| Goles con minuto y equipo | ⛔ Tabla `eventos_partido`: **el lector del portal no tiene acceso y no se conoce su estructura** | 🟠 La respuesta de incidentes (`/event/{id}/incidents`) **ya se descarga** en cada partido, pero el código solo conserva las tarjetas; los goles se descartan |
-| Minuto de entrada y de salida | ⛔ Mismo: los cambios figurarían en `eventos_partido` si existen | 🟠 Los cambios vienen en los mismos incidentes y también se descartan. Los titulares se distinguen en la alineación (`substitute`) |
-| Salida por roja | ⛔ Mismo | 🟠 La tarjeta roja con su minuto ya se extrae al descargar (`cardMinutes`), pero queda solo en los archivos del partido, no en la base |
-| Dónde se guardaría | Se leería en cada carga, como el resto de COMET (no se guarda nada) | ⛔ **Hoy no hay ninguna tabla por partido**: la base solo guarda métricas agregadas por jugador y temporada |
+## Cobertura y goles rivales
 
-### COMET: lo que falta
+La inspección del 13-10-2026, después de sincronizar COMET, encontró 4.767 eventos
+en 536 partidos; 539 partidos de O'Higgins tienen marcador final. Bajo el conteo
+de gol, penal convertido y autogol, 131 reconstruyen ese marcador. Es una cobertura
+preliminar de goles, **no 131 partidos con todos los intervalos de jugadores validados**.
+Todos los eventos goleadores disponibles pertenecen a O'Higgins: no hay eventos de
+goleadores rivales. Un autogol propio sí puede explicar un gol recibido.
+Con el adaptador completo, la comprobación de lectura calculó 1.948 intervalos de
+jugadores en 125 partidos; el resto permanece sin dato por cobertura insuficiente.
 
-1. **Estructura de `eventos_partido`**: nombres y tipos de columnas y los valores posibles del tipo de evento (gol, cambio, tarjeta…), y si
-   el minuto trae descuento. Sin eso no se puede escribir la consulta ni saber si la cobertura alcanza las categorías formativas.
-2. **Permiso de lectura.** Hoy el rol `comet_reader` no tiene `SELECT` sobre esa tabla (a propósito: no se concedió ningún permiso). Haría falta una
-   migración que dé solo lectura sobre esa tabla, con su política de seguridad por filas, **que revise y aplique el propietario de la base**. Este repositorio
-   no la aplica; se redacta cuando se conozca la tabla. La separación COMET/Scouting no cambia: se amplía lo que el lector de COMET puede leer dentro de COMET.
-3. **Calidad**: cuántos partidos tienen eventos y si los goles suman el marcador (el cálculo lo comprueba y descarta el partido si no cuadra).
+Si los goles no reconstruyen exactamente **ambos** marcadores finales, el resultado
+en cancha queda «— / Cronología de goles incompleta». Un 0-0 necesita que exista
+algún evento del partido para distinguir una cronología vacía de un export ausente.
 
-### Scouting: lo que falta
+Para ampliar la cobertura:
 
-1. **Conservar goles y cambios** al descargar cada partido (hoy se descartan) y guardarlos **por partido**: una tabla nueva y su migración, y una importación
-   atómica como la de métricas. Los datos agregados actuales no sirven: perdieron el minuto.
-2. **Volver a descargar** los partidos ya publicados (2024, 2025 y el corte de 2026) para tener sus incidentes. La extracción de Sofascore está limitada
-   (5 segundos entre peticiones y bloqueo 403 desde los ejecutores de GitHub), así que se haría con el procedimiento manual local ya documentado.
-3. **Formato real de los incidentes.** El repositorio solo conoce los incidentes de tarjeta. Los de gol y cambio (campos de minuto, descuento, equipo
-   local o visitante, jugador que entra y sale) hay que **confirmarlos con una muestra real** de un partido antes de escribir el lector.
+1. En COMET Data Platform, revisar el informe **Eventos de partido**: solicitar
+   eventos de **ambos equipos en los partidos de O'Higgins**, manteniendo el ámbito
+   de partidos y temporadas del club. El importador de `dataProject` conserva los
+   equipos recibidos; no elimina goles rivales.
+2. Si cambia el enlace del informe, actualizar privadamente `LINK` en la pestaña
+   `ENDPOINTS` de la hoja configurada en `dataProject`; no publicar su `API_KEY`.
+3. Ejecutar la sincronización COMET existente y contrastar otra vez goles y
+   marcador final, además de la cobertura de cambios. Revisar los catálogos de
+   equipos, competidores y personas para respetar las relaciones del importador.
+4. Si el informe no permite esa cobertura, COMET documenta una API de exportación
+   por partido: `/api/export/comet/match/{matchFifaId}/events`. Es **otra API**;
+   no se debe reutilizar ni asumir válida la clave del informe. El superusuario
+   COMET de la organización debe facilitar el Swagger del tenant y una clave con
+   ámbito autorizado. No se ha conectado esa API ni obtenido esa clave en esta PR.
 
-## Qué hay que decidir
+Fuentes oficiales: [eventos por partido y sincronización](https://kb.analyticom.de/comet/additional-guidelines),
+[acceso y filtros de COMET LIVE API](https://kb.analyticom.de/live/comet-live-api).
 
-* **Gol en el mismo minuto que un cambio** (supuesto actual: cuenta con el jugador dentro). Es una regla futbolística: ¿lo define Pablo?
-* **Dónde mostrarlo.** Propuesta: en COMET, columnas *Entró / Salió / Marcador al entrar / Marcador al salir / ¿Cambió?* en la planilla de *Partido semanal*,
-  el historial de la *Ficha del jugador* y un conteo de partidos en que el resultado cambió a favor mientras estuvo; en Scouting, una tabla por partido
-  en la ficha del jugador. Si Pablo prefiere otra cosa, se ajusta.
-* **Qué pasa con los partidos sin eventos:** se muestran con «—» (sin dato) y el resultado final aparte, nunca como un cambio de resultado supuesto.
+## Scouting: integración pendiente
 
-## Qué necesito para seguir
-
-1. La estructura de `eventos_partido` (basta con los nombres de columnas, sus tipos y los valores del tipo de evento; no hace falta compartir datos de jugadores).
-2. Si COMET se puede consultar con permiso para esa tabla, o si hay otra fuente de goles y cambios con minuto para las categorías formativas.
-3. Una muestra de la respuesta `/event/{id}/incidents` de un partido de la Primera División de Chile (puede ser la copia de un partido cualquiera).
-4. La decisión sobre el gol del mismo minuto.
-
-Relacionado: [seguimiento deportivo de COMET](comet-seguimiento-deportivo.md) (pregunta 1 del listado de reglas).
+El cálculo genérico también sirve para Sofascore, pero la BD de scouting conserva
+métricas agregadas por jugador/temporada. Hay que guardar goles y cambios de los
+incidentes por partido, validar su contrato y volver a importar los históricos.
+Esta PR conecta **COMET**, sin modificar la sincronización ni las pantallas de Sofascore.

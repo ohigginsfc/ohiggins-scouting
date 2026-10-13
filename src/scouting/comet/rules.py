@@ -66,12 +66,10 @@ RULE_DEFS: tuple[RuleDef, ...] = (
         'se considera adelantado?'),
     RuleDef(
         'min_minutes_on_pitch', 'Minutos mínimos para contar el resultado del partido', 1, ORIGIN_ASSUMED, 'int',
-        'Pablo definió (13-10-2026) lo que quiere ver: el resultado cuando el jugador entró y cuando salió, y si el '
-        'resultado cambió mientras estuvo en la cancha. Eso necesita el minuto de cada gol y de cada cambio, que COMET '
-        'aún no entrega a este portal. Mientras tanto, el "resultado con el jugador en cancha" es el resultado final de '
-        'los partidos en que el jugador sumó al menos este número de minutos.',
-        'Falta el dato, no la decisión: ¿se puede revisar y autorizar la lectura de la tabla de eventos del partido '
-        '(eventos_partido), con el minuto de goles y cambios? Sin ella solo se puede mostrar el resultado final.',
+        'Los indicadores históricos de victorias usan el resultado final de partidos en que jugó al menos '
+        'este número de minutos. El marcador real al entrar y salir se calcula por separado con eventos '
+        'en Partido semanal y Ficha del jugador; no depende de este mínimo.',
+        '¿Qué mínimo de minutos debe contar para el indicador de victorias finales en partidos jugados?',
         minimum=1, maximum=90),
     RuleDef(
         'possible_from_first_call', 'Minutos posibles: contar desde la primera citación', False, ORIGIN_ASSUMED, 'bool',

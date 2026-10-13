@@ -15,6 +15,8 @@ COMET incluye, solo para administración, el [seguimiento deportivo](docs/comet-
 pedido por el club: partido semanal, rankings por categoría, ficha del jugador, indicadores, alertas
 automáticas, jugadores adelantados y configuración. Se puede revisar sin datos reales con
 `streamlit run scripts/demo_comet_followup.py --server.address=127.0.0.1` (datos ficticios).
+Partido semanal y Ficha del jugador incluyen el [marcador al entrar y salir](docs/resultado-con-jugador-en-cancha.md),
+cuando goles y cambios permiten reconstruirlo; requieren la lectura de eventos (migración 004).
 
 Consultar el [manual de cuentas, permisos y despliegue del portal](docs/unified-portal.md).
 Utiliza `.env.portal` y `docker-compose.portal.yml`, con puerto local 18502 por
