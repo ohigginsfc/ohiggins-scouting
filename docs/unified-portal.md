@@ -64,6 +64,9 @@ Supabase controla los límites de intentos. Se conserva siempre un admin activo.
    entregas del resumen semanal, sin el cual el script no envía nada; sin ella esas pantallas
    funcionan con valores por defecto y en solo lectura). Ver
    [Seguimiento deportivo COMET](comet-seguimiento-deportivo.md).
+   Para el marcador al entrar y salir, aplicar `db/portal/004_comet_events_reader.sql`
+   después de la 002: lectura de eventos de partidos del club, sin escritura ni
+   permisos nuevos para scout. Ver [cobertura y goles rivales](resultado-con-jugador-en-cancha.md).
 2. Copiar `.env.portal.example` a `.env.portal` y completar las tres conexiones
    independientes y las claves de Supabase Auth. La clave secreta solo va al backend;
    nunca a URLs, repositorio, navegador o logs. Usar el session pooler y SSL.

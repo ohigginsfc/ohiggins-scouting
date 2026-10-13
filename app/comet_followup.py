@@ -9,7 +9,7 @@ import plotly.express as px
 import streamlit as st
 
 from comet_context import Context, context, season_choices
-from scouting.comet import config_store, metrics
+from scouting.comet import config_store, events, metrics
 from scouting.comet.categories import age_on
 from scouting.comet.facts import ROLE_STARTER, ROLE_SUB_IN, ROLE_SUB_OUT, ROLE_UNKNOWN
 from scouting.comet.digest import MONTHS, spanish_date
@@ -51,17 +51,18 @@ def _match_title(m) -> str:
 
 
 def _sheet_table(ctx: Context, rows: pd.DataFrame, match) -> None:
-    """Tabla de jugadores de un rol, con su resultado del partido si jugaron lo suficiente."""
-    threshold = ctx.rules.value('min_minutes_on_pitch')
-    played = rows['participated'] & (rows['minutes'] >= threshold)
-    text = f'{_result_text(match)} {_score(match)}' if match.result and isinstance(match.result, str) else 'sin resultado'
-    rows = rows.assign(resultado_en_cancha=[text if p else None for p in played],
-                       displayname=rows['displayname'].map(_label))
+    """Planilla con el marcador real a la entrada y salida, separado del final."""
+    rows = events.attach_results(rows, ctx.computed.onpitch).assign(displayname=lambda d: d['displayname'].map(_label))
     show_table(rows, {
         'displayname': ('Jugador', None), 'age': ('Edad', FMT_INT), 'minutes': ('Minutos', FMT_INT),
         'goals': ('Goles', FMT_INT), 'own_goals': ('Autogoles', FMT_INT), 'yellow_cards': ('Amarillas', FMT_INT),
         'second_yellows': ('2.ª amarilla', FMT_INT), 'red_cards': ('Rojas', FMT_INT),
-        'resultado_en_cancha': ('Resultado con el jugador en cancha', None)})
+        'onpitch_entry': ('Entró', None), 'onpitch_exit': ('Salió', None),
+        'onpitch_score_entry': ('Marcador al entrar', None), 'onpitch_state_entry': ('Al entrar', None),
+        'onpitch_score_exit': ('Marcador al salir', None), 'onpitch_state_exit': ('Al salir', None),
+        'onpitch_changed': ('¿Cambió el resultado?', None),
+        'onpitch_for': ('Goles a favor en cancha', FMT_INT), 'onpitch_against': ('Goles en contra en cancha', FMT_INT),
+        'onpitch_status': ('Cronología', None)})
 
 
 def render_match(ctx: Context, matchid: str) -> None:
@@ -77,6 +78,11 @@ def render_match(ctx: Context, matchid: str) -> None:
     if sheet.empty:
         st.info('COMET no trae la planilla de este partido.')
         return
+    coverage = ctx.computed.onpitch
+    coverage = coverage[(coverage['matchid'] == matchid) & (coverage['personid'].isin(sheet.loc[sheet['participated'], 'personid']))]
+    if len(coverage) and (coverage['onpitch_status'] != 'Calculado').any():
+        st.caption('Resultado en cancha: «—» cuando faltan goles o cambios. El marcador final se muestra arriba.')
+    st.caption('Gol y cambio en el mismo minuto: se cuenta el gol con el jugador dentro.')
     if sheet['conflict'].any():
         st.warning(f'{int(sheet["conflict"].sum())} jugador(es) tienen filas repetidas con valores distintos en este partido: '
                    'no se elige ninguna y sus datos se muestran como «—» (rol «Sin dato»).')
@@ -127,7 +133,7 @@ def page_weekly_match() -> None:
     if matches.empty:
         st.info('COMET no tiene partidos ya jugados de O’Higgins.')
         return
-    rule_note(ctx.rules, ['min_minutes_on_pitch', 'roster_rule'])
+    rule_note(ctx.rules, ['roster_rule'])
     counts = matches.groupby('week_start').size()
     weeks = sorted(counts.index, reverse=True)
     c1, c2 = st.columns([2, 3])
@@ -180,7 +186,7 @@ def _bar(frame: pd.DataFrame, value: str, label: str, name: str = 'displayname')
 @admin_only
 def page_rankings() -> None:
     inject_styles()
-    title('Rankings por categoría', 'Minutos, goles, tarjetas y partidos ganados con el jugador en cancha.')
+    title('Rankings por categoría', 'Minutos, goles, tarjetas y victorias finales en partidos jugados.')
     ctx = context()
     ds, cat = ctx.ds, ctx.computed.cat
     if cat.empty:
@@ -204,7 +210,7 @@ def page_rankings() -> None:
                    f'distintos en su planilla y no se elige ninguna: {names}{"…" if len(excluded) > 8 else ""}. '
                    'Ver Seguimiento y configuración → Calidad de datos.')
     no_minutes = metrics.minutes_gap_players(cat, category=category, season_year=season)
-    tabs = st.tabs(['Minutos jugados', 'Goles', 'Tarjetas', 'Partidos ganados con el jugador en cancha'])
+    tabs = st.tabs(['Minutos jugados', 'Goles', 'Tarjetas', 'Victorias finales en partidos jugados'])
 
     def board(metric: str, value: str, label: str, extra: dict, chart: bool = True) -> None:
         ranked = metrics.ranking(ctx.computed.cat, metric, category=category, season_year=season, top=limit)
@@ -241,6 +247,7 @@ def page_rankings() -> None:
     with tabs[3]:
         board('Partidos ganados con el jugador en cancha', 'wins_with', 'Partidos ganados',
               {'results_with': ('Partidos con resultado', FMT_INT), 'win_pct_with': ('% victorias', FMT_PCT)})
+        st.caption('Este ranking usa el resultado final. El marcador al entrar y salir está en Partido semanal y Ficha del jugador.')
 
 
 def _player_options(ctx: Context, season, category) -> pd.DataFrame:
@@ -375,7 +382,7 @@ def page_player() -> None:
     k[3].metric('Goles', fmt(total['goals'].sum(min_count=1)))
     k[4].metric('Amarillas / rojas', f'{fmt(total["yellow_cards"].sum(min_count=1))} / {fmt(total["red_cards"].sum(min_count=1))}')
     results = total['results_with'].sum()
-    k[5].metric('Victorias con el jugador', fmt(total['wins_with'].sum() / results * 100 if results else None, 0, ' %'))
+    k[5].metric('Victorias finales en partidos jugados', fmt(total['wins_with'].sum() / results * 100 if results else None, 0, ' %'))
 
     tabs = st.tabs(['Historial', 'Categoría vs edad', 'Evolución', 'Partidos', 'Arquero', 'Seguimiento'])
     with tabs[0]:
@@ -387,7 +394,7 @@ def page_player() -> None:
             'yellow_cards': ('Amarillas', FMT_INT), 'second_yellows': ('2.ª amarilla', FMT_INT),
             'red_cards': ('Rojas', FMT_INT), 'own_goals': ('Autogoles', FMT_INT),
             'possible_minutes': ('Minutos posibles', FMT_INT), 'participation_pct': ('Participación', FMT_PCT),
-            'wins_with': ('Ganados con él', FMT_INT), 'win_pct_with': ('% victorias', FMT_PCT),
+            'wins_with': ('Victorias finales en partidos jugados', FMT_INT), 'win_pct_with': ('% victorias finales', FMT_PCT),
             'incomplete': ('Partidos con datos contradictorios', FMT_INT)})
     with tabs[1]:
         by_season = facts.groupby('season_year', as_index=False).agg(
@@ -430,11 +437,19 @@ def page_player() -> None:
             rival=lambda d: d['rival'].map(lambda r: _label(r, 'rival sin nombre')),
             marcador=lambda d: [None if pd.isna(a) or pd.isna(b) else f'{int(a)}-{int(b)}'
                                 for a, b in zip(d['goals_for'], d['goals_against'])])
+        log = events.attach_results(log, ctx.computed.onpitch)
         show_table(log, {'fecha': ('Fecha', None), 'category': ('Categoría', None), 'rival': ('Rival', None),
-                         'venue': ('Local / Visita', None), 'marcador': ('Marcador', None), 'result': ('Resultado', None),
+                         'venue': ('Local / Visita', None), 'marcador': ('Marcador final', None), 'result': ('Resultado final', None),
                          'role': ('Rol', None), 'minutes': ('Minutos', FMT_INT), 'goals': ('Goles', FMT_INT),
-                         'yellow_cards': ('Amarillas', FMT_INT), 'red_cards': ('Rojas', FMT_INT)},
+                         'yellow_cards': ('Amarillas', FMT_INT), 'red_cards': ('Rojas', FMT_INT),
+                         'onpitch_entry': ('Entró', None), 'onpitch_exit': ('Salió', None),
+                         'onpitch_score_entry': ('Marcador al entrar', None), 'onpitch_state_entry': ('Al entrar', None),
+                         'onpitch_score_exit': ('Marcador al salir', None), 'onpitch_state_exit': ('Al salir', None),
+                         'onpitch_changed': ('¿Cambió el resultado?', None),
+                         'onpitch_for': ('Goles a favor en cancha', FMT_INT), 'onpitch_against': ('Goles en contra en cancha', FMT_INT),
+                         'onpitch_status': ('Cronología', None)},
                    colors=('result', RESULT_COLORS))
+        st.caption('Gol y cambio en el mismo minuto: se cuenta el gol con el jugador dentro.')
     with tabs[4]:
         keeper = ds.goalkeepers[ds.goalkeepers['personid'] == personid]
         keeper = keeper[((keeper['played'] == True).fillna(False) | (keeper['minutesplayed'] > 0)).astype(bool)]  # noqa: E712

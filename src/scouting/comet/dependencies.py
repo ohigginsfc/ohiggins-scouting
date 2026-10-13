@@ -1,6 +1,6 @@
 """Datos de COMET que el seguimiento usa, a medias o todavía no puede usar, y qué se hace mientras tanto.
 
-Este repositorio no modifica dataProject ni concede permisos. La columna `estado` distingue lo que ya existe
+Este repositorio no modifica dataProject; las migraciones de permisos se aplican explícitamente. La columna `estado` distingue lo que ya existe
 en COMET y se usa de lo que hay que confirmar, obtener o inspeccionar con autorización. Ninguna fila dice
 que un dato «falta» sin haberlo comprobado.
 """
@@ -22,14 +22,13 @@ PIPELINE_DEPENDENCIES: tuple[dict, ...] = (
          para='Jugadores no citados que no participaron; minutos posibles exactos',
          hoy='Pablo confirmó (13-10-2026) que el listado del plantel completo no se puede obtener y se mantiene como '
              'está: referencial, con quienes figuran en otra planilla de la misma competición.'),
-    dict(estado=NO_ACCESS,
+    dict(estado='En uso con cobertura parcial; requiere migración 004',
          dato='Cronología del partido (minuto de goles, tarjetas y cambios): tabla eventos_partido',
          para='Resultado cuando el jugador entró y cuando salió, y si el resultado cambió mientras estuvo en la cancha '
               '(lo que pidió Pablo el 13-10-2026)',
-         hoy='La tabla existe, pero el lector del portal no tiene SELECT sobre ella y no se comprobó su contenido ni su '
-             'estructura. No se concedieron permisos: falta una inspección autorizada de su calidad y cobertura y '
-             'el visto bueno del propietario de la base. Mientras tanto, resultado final del partido en que el jugador '
-             'sumó el mínimo de minutos.'),
+         hoy='Partido semanal y Ficha del jugador muestran marcador al entrar y salir solo si goles y cambios '
+             'permiten reconstruirlo. El export disponible solo trae eventos goleadores de O’Higgins: falta ampliar '
+             'la fuente a ambos equipos. Sin permisos, goles completos o cambios válidos se muestra sin dato.'),
     dict(estado=TO_CONFIRM,
          dato='Fecha «datefrom» de la ficha del jugador',
          para='Antigüedad en el club',

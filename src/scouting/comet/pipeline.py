@@ -10,7 +10,7 @@ from typing import Optional
 
 import pandas as pd
 
-from . import metrics, quality
+from . import events, metrics, quality
 from .facts import Dataset, build_dataset
 from .rules import Rules
 
@@ -23,6 +23,7 @@ class Computed:
     principal: pd.DataFrame   # categoría principal de cada jugador y temporada
     quality: pd.DataFrame
     raw_counts: dict
+    onpitch: pd.DataFrame
 
 
 def compute_all(raw: dict, stored_rules: Optional[dict] = None, periods: Optional[pd.DataFrame] = None) -> Computed:
@@ -32,4 +33,5 @@ def compute_all(raw: dict, stored_rules: Optional[dict] = None, periods: Optiona
     cat = metrics.category_summary(comp)
     return Computed(ds=ds, comp=comp, cat=cat, principal=metrics.principal_categories(cat),
                     quality=quality.data_quality(ds, raw['sheet'], raw['matches'], periods, comp),
-                    raw_counts={k: len(v) for k, v in raw.items()})
+                    raw_counts={k: len(v) for k, v in raw.items()},
+                    onpitch=events.result_rows(ds, raw.get('events')))
