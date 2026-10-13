@@ -136,6 +136,19 @@ def test_retry_exhaustion_and_oversized_wait_are_failures(monkeypatch):
     assert post.call_count == 1
 
 
+@pytest.mark.parametrize('limits', [{'max_retries': -1}, {'max_retries': True}, {'max_retries': 1.5},
+                                  {'max_wait': -1}, {'max_wait': float('inf')}, {'max_wait': float('nan')}])
+def test_invalid_retry_limits_cannot_skip_the_network_and_claim_success(limits):
+    with pytest.raises(ValueError, match='Límites'):
+        publisher.Publisher('https://example.invalid', 'key', **limits)
+
+
+def test_nonfinite_values_are_null_even_when_decimal_overflows_a_float():
+    values = [pd.NA, pd.NaT, float('inf'), float('-inf'), float('nan'), Decimal('1e999'), Decimal('NaN')]
+    assert publisher.sanitize({'values': values}) == {'values': [None] * len(values)}
+    assert publisher.sanitize(Decimal('1.5')) == 1.5
+
+
 @pytest.mark.parametrize('table', ['scouting.players', 'portal.accounts', 'players', 'jugadores;DROP TABLE'])
 def test_worker_cannot_publish_outside_comet_tables(monkeypatch, table):
     post = Mock()

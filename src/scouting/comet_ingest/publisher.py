@@ -29,7 +29,7 @@ def sanitize(value):
     if isinstance(value, (pd.Timestamp, datetime, date)):
         return value.isoformat()
     if isinstance(value, Decimal):
-        return float(value) if value.is_finite() else None
+        return sanitize(float(value)) if value.is_finite() else None
     if isinstance(value, float):
         return None if not math.isfinite(value) else int(value) if value.is_integer() else value
     return value
@@ -65,6 +65,9 @@ class Publisher:
 
     def __post_init__(self):
         validate_destination(self.url, self.key)
+        if (not isinstance(self.max_retries, int) or isinstance(self.max_retries, bool) or self.max_retries < 0
+                or not isinstance(self.max_wait, (int, float)) or not math.isfinite(self.max_wait) or self.max_wait < 0):
+            raise ValueError('Límites de reintento y espera inválidos')
         self.url = self.url.rstrip('/')
 
     @classmethod
