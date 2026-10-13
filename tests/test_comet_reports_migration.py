@@ -85,7 +85,7 @@ def test_empty_alerts_are_explicitly_published_with_headers():
 
 
 def test_pagination_order_and_complete_cache(monkeypatch):
-    get = Mock(side_effect=[SimpleNamespace(status_code=200, headers={'Content-Range': '0-999/1001'}, json=lambda: [dict(personid=i) for i in range(1000)]),
+    get = Mock(side_effect=[SimpleNamespace(status_code=206, headers={'Content-Range': '0-999/1001'}, json=lambda: [dict(personid=i) for i in range(1000)]),
                            SimpleNamespace(status_code=200, headers={'Content-Range': '1000-1000/1001'}, json=lambda: [dict(personid=1000)])])
     monkeypatch.setattr('scouting.comet_reports.source.requests.get', get)
     source = ReportSource('https://example.supabase.co', 'synthetic')

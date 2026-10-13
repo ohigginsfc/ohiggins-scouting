@@ -45,7 +45,7 @@ class ReportSource:
                 except requests.RequestException:
                     raise RuntimeError(f'Lectura COMET {name}: conexión rechazada') from None
                 if response is not None:
-                    if response.status_code == 200:
+                    if response.status_code in (200, 206):
                         break
                     if response.status_code not in (429, 500, 502, 503, 504) or attempt == self.transport.max_retries:
                         raise RuntimeError(f'Lectura COMET {name}: HTTP {response.status_code}')
