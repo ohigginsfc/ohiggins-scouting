@@ -96,9 +96,12 @@ def _yellow_cards(ds: Dataset, season_year: int) -> pd.DataFrame:
         grouped = by_season.groupby('personid', as_index=False).agg(
             displayname=('displayname', 'first'), value=('yellow_cards', _sum_or_nan), second=('second_yellows', _sum_or_nan))
         # Categoría que se muestra: donde sumó más minutos esa temporada (la última fila de la planilla no dice nada).
-        minutes = by_season.assign(_m=by_season['minutes'].fillna(0)).groupby(['personid', 'category'], as_index=False)['_m'].sum()
-        main = minutes.sort_values(['_m', 'category'], ascending=False).groupby('personid').head(1).set_index('personid')['category']
-        grouped['category'] = grouped['personid'].map(main)
+        summary = by_season.groupby(['personid', 'category'], as_index=False).agg(
+            minutes=('minutes', _sum_or_nan), cited=('matchid', 'nunique'),
+            category_rank=('category_rank', 'first'), minutes_missing=('minutes_unknown', 'sum'))
+        summary['season_year'] = season_year
+        main = principal_categories(summary).set_index('personid')['category']
+        grouped['category'] = grouped['personid'].map(main).fillna('Sin dato')
         grouped['scope'] = f'la temporada {season_year}'
         parts.append(grouped)
     if not parts:

@@ -1,8 +1,8 @@
 # COMET · Seguimiento deportivo (solicitud de Pablo)
 
 Siete pantallas nuevas dentro del módulo COMET del portal unificado, solo para el rol **Admin**.
-Las cinco pantallas anteriores (Resumen ejecutivo, Desarrollo juvenil, Rendimiento competitivo,
-Análisis de jugadores y Estructura del plantel) no cambian. Scout sigue sin acceso a COMET.
+Las pantallas anteriores mantienen sus funciones; Estructura del plantel y Desarrollo juvenil
+usan los topes por defecto de las secciones del club. Scout sigue sin acceso a COMET.
 
 | Pantalla | Qué resuelve |
 |---|---|
@@ -23,7 +23,9 @@ Capturas de cada pantalla (datos ficticios) en [`comet-seguimiento/capturas`](co
   se ven como «—»; no se muestra la suma de los demás partidos como si fuera el total (ver *Minutos desconocidos* más abajo).
 * **Ninguna regla supuesta se presenta como aprobada por Pablo.** Cada regla tiene origen (`pablo` o `supuesto`) y las pantallas
   que dependen de un supuesto muestran un aviso «Criterios provisionales» con la etiqueta *Supuesto: pendiente de confirmar*.
-  Solo pasan a *Confirmada por el club* cuando un administrador lo marca en Seguimiento y configuración.
+  Pasan a *Confirmada por el club* cuando un administrador lo marca en Seguimiento y configuración
+  o cuando se aplica el valor exacto de una decisión registrada del club. Una configuración guardada
+  diferente no queda confirmada automáticamente por esa decisión.
 * **Sin datos reales en el repositorio.** Las pruebas y las capturas usan datos ficticios (`scripts/comet_demo_data.py`).
 
 ## Cobertura de la solicitud

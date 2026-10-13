@@ -231,7 +231,8 @@ class Rules:
         entry = self._stored.get(key) or {}
         if 'confirmed' in entry:
             return bool(entry['confirmed'])
-        return RULES_BY_KEY[key].decision is not None
+        rule = RULES_BY_KEY[key]
+        return rule.decision is not None and self.value(key) == rule.default
 
     def status(self, key: str) -> str:
         rule = RULES_BY_KEY[key]

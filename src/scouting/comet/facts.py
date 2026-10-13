@@ -299,7 +299,10 @@ def build_dataset(sheet_raw, matches_raw, players_raw, goalkeepers_raw, rules: R
     birth = f['dateofbirth']
     before_cutoff = (birth.dt.month * 100 + birth.dt.day) > (cutoff_month * 100 + cutoff_day)
     f['age'] = f['season_year'] - birth.dt.year - before_cutoff.astype(float)
-    ages = {a: category_for_age(a, ladder) for a in f['age'].dropna().unique()}
+    # Las categorías históricas se conservan para comparar dónde jugó, pero no
+    # sustituyen las secciones que el club configuró para la categoría por edad.
+    age_ladder = build_ladder(rules.ladder_caps())
+    ages = {a: category_for_age(a, age_ladder) for a in f['age'].dropna().unique()}
     f['age_category'] = f['age'].map(ages)
     pairs = f[['category', 'age_category']].drop_duplicates()
     ahead = {(a, b): steps_ahead(a, b, ladder) for a, b in zip(pairs['category'], pairs['age_category'])}
