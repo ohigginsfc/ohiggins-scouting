@@ -33,6 +33,30 @@ def get_position_counts(conn: Connection) -> list[dict[str, Any]]:
         return list(cur.fetchall())
 
 
+def get_position_counts_by_nationality(conn: Connection) -> list[dict[str, Any]]:
+    """Igual que `get_position_counts`, desglosado por la nacionalidad que figura en la ficha del jugador.
+
+    Los grupos (chilenos, extranjeros, sin dato) se arman en `nationality_service`: la nacionalidad es texto libre.
+    """
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """
+            SELECT
+                p.position,
+                p.nationality,
+                COUNT(DISTINCT p.id)::int AS players_count,
+                COUNT(DISTINCT sr.id)::int AS reports_count
+            FROM players p
+            INNER JOIN scouting_reports sr ON sr.player_id = p.id
+            WHERE p.position IS NOT NULL AND trim(p.position) <> ''
+              AND COALESCE(sr.is_hidden, FALSE) = FALSE
+            GROUP BY p.position, p.nationality
+            ORDER BY p.position ASC, p.nationality ASC NULLS LAST
+            """
+        )
+        return list(cur.fetchall())
+
+
 def get_position_summary(conn: Connection, position: str, *, season: str | None = None) -> list[dict[str, Any]]:
     """
     Una fila por jugador scouteado con la posición indicada en ficha.

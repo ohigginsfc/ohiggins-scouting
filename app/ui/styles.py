@@ -878,13 +878,13 @@ section[data-testid="stSidebar"],
 }
 .scouting-filter-chip-label { color: var(--text-secondary); font-weight: 550; }
 
-.stApp .st-key-dashboard_pitch_chart {
+.stApp [class*="st-key-"][class*="_pitch_chart"] {
     width: 100%;
     max-width: 1120px;
     margin-left: auto;
     margin-right: auto;
 }
-.stApp .st-key-dashboard_pitch_chart [data-testid="stPlotlyChart"] {
+.stApp [class*="st-key-"][class*="_pitch_chart"] [data-testid="stPlotlyChart"] {
     width: 100%;
 }
 
