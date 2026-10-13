@@ -10,6 +10,9 @@ en Supabase Auth. Administración accede a COMET y scouting; el rol scout solo a
 scouting y puede editar sus propios informes visibles. Ambos roles pueden consultar,
 editar, restaurar y eliminar los informes ocultos. Los datos deportivos conservan sus
 esquemas y las sincronizaciones continúan como procesos independientes.
+La [sincronización COMET](docs/comet-synchronization.md) también está en este repo:
+descarga, validación y publicación en Supabase mediante un worker separado. Durante
+la transición su programación permanece desactivada hasta retirar el job del legado.
 
 COMET incluye, solo para administración, el [seguimiento deportivo](docs/comet-seguimiento-deportivo.md)
 pedido por el club: partido semanal, rankings por categoría, ficha del jugador, indicadores, alertas

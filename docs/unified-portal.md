@@ -1,8 +1,10 @@
 # Portal unificado O'Higgins
 
 Una aplicación Streamlit con módulos COMET y Scouting. Las sincronizaciones siguen
-independientes: COMET permanece en dataProject/Actions; Sofascore conserva su worker
-y cron. No se mezclan las tablas deportivas ni se usa un iframe entre aplicaciones.
+independientes dentro del repo unificado: COMET tiene su [importador y workflow](comet-synchronization.md);
+Sofascore conserva su worker y su procedimiento de actualización. La programación
+COMET del nuevo repo permanece desactivada hasta retirar el job del legado. No se
+mezclan las tablas deportivas ni se usa un iframe entre aplicaciones.
 
 ## Identidad y permisos
 
