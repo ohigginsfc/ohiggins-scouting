@@ -100,6 +100,27 @@ versión no implementa un flujo de recuperación por correo ni envía invitacion
 
 ## Validación y reversión
 
+Si aparece «No se pudo iniciar sesión», comprobar Auth **y la conexión de perfiles**;
+ese mensaje no identifica por sí solo una contraseña incorrecta. El `.env` de la web
+antigua de scouting no sustituye `.env.portal`: completar sus seis variables de Auth
+y conexiones con los valores privados reales, nunca `replace-me` ni los ejemplos.
+Las cuentas existentes no se recrean al actualizar.
+
+```bash
+docker compose --env-file .env.portal -f docker-compose.portal.yml exec -T portal python scripts/check_portal_config.py
+```
+
+El comprobador solo lee y muestra PASS/FAIL, tipos de fallo y códigos HTTP; no imprime
+claves, DSN, correos ni tokens. Si se corrige `.env.portal`, recrear el contenedor:
+
+```bash
+docker compose --env-file .env.portal -f docker-compose.portal.yml up -d --build --force-recreate portal
+```
+
+Usar el mismo `--env-file .env.portal` y archivo Compose tanto al arrancar como al
+comprobar. Revisar variables exportadas en la shell: pueden tener prioridad sobre el
+archivo. Comprobar primero en el puerto interno; después en la URL del proxy.
+
 - Testear login real y las pantallas de COMET/scouting con el admin.
 - Testear scout, URL/estado manipulado, caché COMET previamente cargada, informe
   ajeno/propio/migrado, cuentas desactivadas, cambios de rol y último admin.

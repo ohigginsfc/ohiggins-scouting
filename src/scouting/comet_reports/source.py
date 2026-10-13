@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import requests
 from scouting.comet_ingest.publisher import Publisher, TABLES
 from scouting.comet_ingest.db_pipeline.specs import SPECS
+from .errors import ReportError
 
 
 class ReportSource:
@@ -41,35 +42,35 @@ class ReportSource:
                                  'Accept-Profile': 'public', 'Prefer': 'count=exact'}, timeout=(10, 60))
                 except (requests.Timeout, requests.ConnectionError):
                     if attempt == self.transport.max_retries:
-                        raise RuntimeError(f'Lectura COMET {name}: conexión agotada') from None
+                        raise ReportError(f'Lectura COMET {name}: conexión agotada') from None
                 except requests.RequestException:
-                    raise RuntimeError(f'Lectura COMET {name}: conexión rechazada') from None
+                    raise ReportError(f'Lectura COMET {name}: conexión rechazada') from None
                 if response is not None:
                     if response.status_code in (200, 206):
                         break
                     if response.status_code not in (429, 500, 502, 503, 504) or attempt == self.transport.max_retries:
-                        raise RuntimeError(f'Lectura COMET {name}: HTTP {response.status_code}')
+                        raise ReportError(f'Lectura COMET {name}: HTTP {response.status_code}')
                 import time
                 time.sleep(self.transport._wait(response, attempt))
             try:
                 batch = response.json()
             except ValueError:
-                raise RuntimeError('Supabase devolvió una respuesta de lectura inválida') from None
+                raise ReportError('Supabase devolvió una respuesta de lectura inválida') from None
             if not isinstance(batch, list) or any(not isinstance(row, dict) for row in batch):
-                raise RuntimeError('Supabase devolvió un contrato de lectura inválido')
+                raise ReportError('Supabase devolvió un contrato de lectura inválido')
             content_range = response.headers.get('Content-Range', '')
             match = re.fullmatch(r'(?:\d+-\d+|\*)/(\d+)', content_range)
             if not match:
-                raise RuntimeError('Supabase no confirmó el total de filas; lectura incompleta')
+                raise ReportError('Supabase no confirmó el total de filas; lectura incompleta')
             total = int(match[1])
             if expected_total is not None and total != expected_total:
-                raise RuntimeError('El origen cambió durante la lectura; reintentar antes de publicar')
+                raise ReportError('El origen cambió durante la lectura; reintentar antes de publicar')
             expected_total = total
             rows.extend(batch)
             if len(rows) == total:
                 break
             if not batch or len(rows) > total:
-                raise RuntimeError('Supabase devolvió una página incompleta o inconsistente')
+                raise ReportError('Supabase devolvió una página incompleta o inconsistente')
             offset += len(batch)
         self.cache[name] = rows
         return rows
@@ -95,5 +96,5 @@ class ReadQuery:
     def execute(self):
         rows = self.source.rows(self.name)[self.start:self.end + 1]
         if any(set(self.columns) - set(row) for row in rows):
-            raise RuntimeError('Faltan columnas necesarias para los reportes COMET')
+            raise ReportError('Faltan columnas necesarias para los reportes COMET')
         return SimpleNamespace(data=[{column: row[column] for column in self.columns} for row in rows])

@@ -8,7 +8,6 @@ from scouting.comet_reports import category, job, notify, sheets
 from scouting.comet_reports.source import ReportSource
 from scouting.comet_ingest.db_pipeline.specs import SPECS
 from scouting.comet import mailer
-from scouting.comet.digest import Digest
 
 
 def row(table, **values):
@@ -95,6 +94,24 @@ def test_pagination_order_and_complete_cache(monkeypatch):
     assert len(source.rows('jugadores')) == 1001 and get.call_count == 2
 
 
+def test_server_page_cap_cannot_silently_truncate_report(monkeypatch):
+    get = Mock(side_effect=[SimpleNamespace(status_code=206, headers={'Content-Range': '0-1/3'}, json=lambda: [{'personid': 1}, {'personid': 2}]),
+                           SimpleNamespace(status_code=200, headers={'Content-Range': '2-2/3'}, json=lambda: [{'personid': 3}])])
+    monkeypatch.setattr('scouting.comet_reports.source.requests.get', get)
+    source = ReportSource('https://example.supabase.co', 'synthetic')
+    assert len(source.rows('jugadores')) == 3
+    assert get.call_args_list[1].kwargs['params']['offset'] == 2
+
+
+def test_missing_exact_count_cannot_be_certified_as_complete(monkeypatch):
+    get = Mock(return_value=SimpleNamespace(status_code=200, headers={'Content-Range': '0-0/*'}, json=lambda: [{'personid': 1}]))
+    monkeypatch.setattr('scouting.comet_reports.source.requests.get', get)
+    source = ReportSource('https://example.supabase.co', 'synthetic')
+    with pytest.raises(RuntimeError, match='total de filas'):
+        source.rows('jugadores')
+    assert 'jugadores' not in source.cache
+
+
 def test_read_failure_does_not_log_body_or_become_empty(monkeypatch):
     get = Mock(return_value=SimpleNamespace(status_code=403, text='PRIVATE TOKEN AND PLAYER'))
     monkeypatch.setattr('scouting.comet_reports.source.requests.get', get)
@@ -172,3 +189,20 @@ def test_technical_email_has_only_status_and_run_link():
 def test_missing_mail_configuration_cannot_pass():
     with pytest.raises(ValueError):
         notify.send_status('success', env={})
+
+
+def test_smtp_validation_does_not_send_email():
+    session = MagicMock()
+    factory = Mock(return_value=session)
+    notify.check_smtp(env={'COMET_REPORT_SMTP_USER': 'a@example.test', 'COMET_REPORT_SMTP_PASSWORD': 'synthetic'}, smtp_factory=factory)
+    session.__enter__.return_value.login.assert_called_once()
+    session.__enter__.return_value.send_message.assert_not_called()
+
+
+def test_cli_masks_uncontrolled_errors_and_explains_controlled_errors(monkeypatch, capsys):
+    from scripts import publish_comet_reports as cli
+    from scouting.comet_reports.errors import ReportError
+    monkeypatch.setattr(cli, 'run_reports', Mock(side_effect=RuntimeError('PRIVATE TOKEN')))
+    assert cli.main([]) == 1 and 'PRIVATE TOKEN' not in capsys.readouterr().err
+    monkeypatch.setattr(cli, 'run_reports', Mock(side_effect=ReportError('Lectura COMET jugadores: HTTP 403')))
+    assert cli.main([]) == 1 and 'HTTP 403' in capsys.readouterr().err

@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from scouting.comet_reports.job import run_reports
+from scouting.comet_reports.errors import ReportError
 
 
 def main(argv=None):
@@ -26,6 +27,9 @@ def main(argv=None):
             args.summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf8')
         print(json.dumps(summary, ensure_ascii=False))
         return 0
+    except ReportError as exc:
+        print(f'Reportes COMET: {exc}', file=sys.stderr)
+        return 1
     except Exception as exc:
         print(f'Reportes COMET: {type(exc).__name__}. Revisar permisos, temporada y contrato; no se confirma publicación completa.', file=sys.stderr)
         return 1

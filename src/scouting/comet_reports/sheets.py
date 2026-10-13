@@ -4,6 +4,7 @@ import json
 import os
 import time
 import pandas as pd
+from .errors import ReportError
 
 
 class ReportSheets:
@@ -18,7 +19,7 @@ class ReportSheets:
                 scopes=['https://www.googleapis.com/auth/spreadsheets'])
             self.document = gspread.authorize(credentials).open_by_key(document_id)
         except Exception:
-            raise RuntimeError('No se pudo abrir la hoja de reportes; revisar credencial y permiso de editor') from None
+            raise ReportError('No se pudo abrir la hoja de reportes; revisar credencial y permiso de editor') from None
 
     def replace(self, title, frame):
         import gspread
@@ -52,4 +53,4 @@ class ReportSheets:
                         raise
                     time.sleep(min(5 * 2**attempt, 30))
         except Exception:
-            raise RuntimeError('No se pudo publicar una pestaña COMET; revisar permisos y cuota. Publicación posiblemente parcial') from None
+            raise ReportError('No se pudo publicar una pestaña COMET; revisar permisos y cuota. Publicación posiblemente parcial') from None

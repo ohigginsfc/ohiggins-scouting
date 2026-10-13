@@ -5,6 +5,7 @@ import pandas as pd
 from . import category, alerts
 from .source import ReportSource
 from .sheets import ReportSheets
+from .errors import ReportError
 
 DEFAULT_SHEET_ID = '15R7y6NqN6ZEkcVc_TB8UMT2AQjGvavKQmiyblI1okYk'
 
@@ -25,11 +26,11 @@ ALERT_COLUMNS = {
 def prepare(source, *, season, club="O'Higgins"):
     club_id = category.get_club_id(source, club)
     if club_id is None:
-        raise RuntimeError('No se pudo resolver el club para los reportes')
+        raise ReportError('No se pudo resolver el club para los reportes')
     data = category.load_base_data(source, club_id=club_id, season=season)
     master = category.compute_master_category_data(data)
     if not master:
-        raise RuntimeError('No hay datos de partidos jugados para publicar; comprobar club y temporada')
+        raise ReportError('No hay datos de partidos jugados para publicar; comprobar club y temporada')
     frames = {}
     now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
     for name, frame in master.items():
