@@ -7,15 +7,24 @@ from typing import Any
 from psycopg import Connection
 
 from scouting.repositories import dashboard_repository
-from scouting.services import metrics_service, players_service, reports_service
+from scouting.services import metrics_service, nationality_service, players_service, reports_service
 
 
 def get_position_counts(conn: Connection) -> list[dict[str, Any]]:
     return dashboard_repository.get_position_counts(conn)
 
 
-def get_position_summary(conn: Connection, position: str) -> list[dict[str, Any]]:
-    return dashboard_repository.get_position_summary(conn, position)
+def get_position_counts_by_origin(conn: Connection) -> dict[str, list[dict[str, Any]]]:
+    """Conteos por posición para los dos campogramas: `chilean`, `foreign` y `unknown` (sin nacionalidad)."""
+    return nationality_service.split_position_counts(dashboard_repository.get_position_counts_by_nationality(conn))
+
+
+def get_position_summary(conn: Connection, position: str, *, origin: str | None = None) -> list[dict[str, Any]]:
+    """Jugadores de una posición; con `origin` ('chilean' o 'foreign') solo los de ese grupo de nacionalidad."""
+    rows = dashboard_repository.get_position_summary(conn, position)
+    if origin is None:
+        return rows
+    return [r for r in rows if nationality_service.nationality_group(r.get("nationality")) == origin]
 
 
 def get_dashboard_snapshot(conn: Connection, recent_reports_limit: int = 5) -> dict[str, Any]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import html
 import os
 import sys
@@ -24,6 +25,7 @@ from scouting.services import (
     images_service,
     matching_service,
     metrics_service,
+    nationality_service,
     players_service,
     season_comparison_service,
     sofascore_incremental_runner,
@@ -79,8 +81,9 @@ from ui.manual_report_state import (
 from ui.navigation import (
     PREVIOUS_PAGE_KEY,
     build_nav_pages,
+    navigate_to,
 )
-from ui.pitch_map import render_interactive_pitch
+from ui.pitch_map import render_interactive_pitch, selection_state_key
 from ui.styles import build_full_width_layout_css
 from ui.percentile_markers import (
     comparison_legend_html,
@@ -201,6 +204,8 @@ def _render_ficha_fields_row(
 
 UI_SELECTION_KEYS: tuple[str, ...] = (
     "dashboard_selected_position",
+    "dashboard_chile_selected_position",
+    "dashboard_foreign_selected_position",
     "selected_player_id",
     "selected_player",
     "player_lookup_selectbox",
@@ -340,36 +345,52 @@ def _logout_current_session() -> None:
     clear_authentication(st.session_state)
 
 
+PITCH_HALF_WIDTH_HEIGHT = 440  # el campo conserva su proporción: a media pantalla no necesita más alto
+
+# Un campograma por grupo de nacionalidad (Pablo, 13-10-2026): (grupo, prefijo de claves, título).
+PITCH_MAPS: tuple[tuple[str, str, str], ...] = (
+    (nationality_service.CHILEAN, "dashboard_chile", "Mapa de posiciones · jugadores chilenos"),
+    (nationality_service.FOREIGN, "dashboard_foreign", "Mapa de posiciones · jugadores extranjeros"),
+)
+
+
 def _sync_dashboard_position_from_query_params(*, clear_url: bool = True) -> str | None:
-    """Compatibilidad opcional: lee ?dashboard_position= sin recargar vía <a href>."""
+    """Compatibilidad opcional: lee ?dashboard_position= sin recargar vía <a href> y lo aplica a los dos campogramas."""
     raw = st.query_params.get("dashboard_position")
     if raw:
         slug = (raw[0] if isinstance(raw, list) else str(raw)).strip().lower()
         position = TMAP_SLUG_TO_POSITION.get(slug)
         if position:
-            st.session_state["dashboard_selected_position"] = position
+            for _group, prefix, _title in PITCH_MAPS:
+                st.session_state[selection_state_key(prefix)] = position
         if clear_url and "dashboard_position" in st.query_params:
             del st.query_params["dashboard_position"]
-    return st.session_state.get("dashboard_selected_position")
+    return st.session_state.get(selection_state_key(PITCH_MAPS[0][1]))
 
 
-def _clear_dashboard_position() -> None:
-    st.session_state.pop("dashboard_selected_position", None)
+def _clear_pitch_position(key_prefix: str) -> None:
+    st.session_state.pop(selection_state_key(key_prefix), None)
 
 
-def _render_pitch_position_map(counts: dict[str, dict[str, int]], selected: str | None) -> str | None:
+def _render_pitch_position_map(
+    counts: dict[str, dict[str, int]], selected: str | None, *, title: str, key_prefix: str
+) -> str | None:
     """Campograma Plotly (campo + marcadores en el mismo componente)."""
     return render_interactive_pitch(
         short_labels=POSITION_SHORT_LABELS,
         counts=counts,
         selected=selected,
-        on_clear=_clear_dashboard_position,
+        on_clear=functools.partial(_clear_pitch_position, key_prefix),
+        title=title,
+        key_prefix=key_prefix,
+        height=PITCH_HALF_WIDTH_HEIGHT,
     )
 
 
-def _render_position_summary_table(conn, position: str) -> None:
-    rows = dashboard_service.get_position_summary(conn, position)
-    st.markdown(f"### Jugadores e informes — {position}")
+def _render_position_summary_table(conn, position: str, origin: str | None = None) -> None:
+    rows = dashboard_service.get_position_summary(conn, position, origin=origin)
+    suffix = f" · {nationality_service.GROUP_LABELS[origin].lower()}" if origin else ""
+    st.markdown(f"### Jugadores e informes — {position}{suffix}")
     if not rows:
         st.caption("Sin jugadores para esta posición.")
         return
@@ -924,7 +945,64 @@ def _style_recommendation_dataframe(rows: list[dict[str, Any]]) -> Any:
 
     if "Recomendación" not in df.columns:
         return df
-    return df.style.map(_rec_style, subset=["Recomendación"])
+    styled = df.style.map(_rec_style, subset=["Recomendación"])
+    if "Valoración" in df.columns:  # sin los seis decimales del tipo numeric (6.5, no 6.500000)
+        styled = styled.format({"Valoración": lambda v: "—" if pd.isna(v) else f"{float(v):g}"})
+    return styled
+
+
+HIDDEN_PREVIEW_LIMIT = 5
+HIDDEN_PREVIEW_CHARS = 140
+
+
+def _short_text(value: Any, limit: int = HIDDEN_PREVIEW_CHARS) -> str:
+    text = " ".join(str(value or "").split())
+    if not text:
+        return "—"
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _hidden_preview_rows(hidden: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "Jugador": r.get("player_full_name"),
+            "Posición": r.get("player_position") or "—",
+            "Scout": r.get("scout_name") or "—",
+            "Fecha del informe": format_date_for_ui(r.get("report_date"), long=False),
+            "Valoración": round(float(r["rating"]), 2) if r.get("rating") is not None else None,
+            "Recomendación": r.get("recommendation"),
+            "Resumen (inicio)": _short_text(r.get("summary")),
+            "Ocultado": format_datetime_for_ui(r.get("hidden_at")),
+            "Ocultado por": r.get("hidden_by") or "—",
+        }
+        for r in hidden
+    ]
+
+
+def _render_hidden_reports_preview(hidden: list[dict[str, Any]], *, total: int) -> None:
+    """Vista preliminar de los últimos informes ocultos (Pablo, 13-10-2026): se ven sin entrar a la página de gestión."""
+    section_header("Informes ocultos", "Vista preliminar de los más recientes.", icon="hidden")
+    if not hidden:
+        empty_state(
+            "No hay informes ocultos.",
+            "Cuando ocultes un informe desde el Dashboard, aparecerá aquí.",
+            icon="hidden",
+        )
+        return
+    st.dataframe(_style_recommendation_dataframe(_hidden_preview_rows(hidden)), use_container_width=True, hide_index=True)
+    shown = len(hidden)
+    st.caption(
+        f"Se muestran los {shown} más recientes de {total} informes ocultos."
+        if total > shown
+        else f"{total} informe(s) oculto(s)."
+    )
+    st.button(
+        labeled("hidden", "Ver y gestionar todos los informes ocultos"),
+        key="dashboard_open_hidden_reports",
+        type="secondary",
+        on_click=navigate_to,
+        args=("Informes ocultos",),
+    )
 
 
 def _render_dashboard() -> None:
@@ -932,9 +1010,9 @@ def _render_dashboard() -> None:
 
     with get_connection() as conn:
         snap = dashboard_service.get_dashboard_snapshot(conn, recent_reports_limit=25)
-        pos_counts_rows = dashboard_service.get_position_counts(conn)
-        counts_map = _position_counts_lookup(pos_counts_rows)
+        counts_by_origin = dashboard_service.get_position_counts_by_origin(conn)
         visible_reports = fetch_visible_reports(conn, limit=50)
+        hidden_preview = fetch_hidden_reports(conn, limit=HIDDEN_PREVIEW_LIMIT)
 
     k1, k2, k3, k4, k5 = st.columns(5)
     with k1:
@@ -1006,6 +1084,8 @@ def _render_dashboard() -> None:
         ]
         st.dataframe(_style_recommendation_dataframe(rows), use_container_width=True, hide_index=True)
 
+    _render_hidden_reports_preview(hidden_preview, total=int(snap.get("hidden_report_count", 0)))
+
     from ui.data_sync_card import render_data_sync_card
 
     if os.environ.get('PORTAL_MODE') != '1':
@@ -1019,12 +1099,27 @@ def _render_dashboard() -> None:
     _render_visible_reports_management(visible_reports)
 
     _sync_dashboard_position_from_query_params()
-    selected_position = st.session_state.get("dashboard_selected_position")
-    selected_position = _render_pitch_position_map(counts_map, selected_position)
+    selected_by_group: dict[str, str | None] = {}
+    for column, (group, prefix, title) in zip(st.columns(2, gap="large"), PITCH_MAPS, strict=True):
+        with column:
+            selected_by_group[group] = _render_pitch_position_map(
+                _position_counts_lookup(counts_by_origin[group]),
+                st.session_state.get(selection_state_key(prefix)),
+                title=title,
+                key_prefix=prefix,
+            )
+    no_nationality = counts_by_origin["unknown"]
+    if no_nationality:
+        st.caption(
+            f"{sum(r['players_count'] for r in no_nationality)} jugador(es) con "
+            f"{sum(r['reports_count'] for r in no_nationality)} informe(s) no tienen nacionalidad en su ficha: "
+            "no aparecen en ninguno de los dos campogramas. Se asigna al registrar o editar al jugador."
+        )
 
-    if selected_position:
-        with get_connection() as conn:
-            _render_position_summary_table(conn, str(selected_position))
+    for group, _prefix, _title in PITCH_MAPS:
+        if selected_by_group.get(group):
+            with get_connection() as conn:
+                _render_position_summary_table(conn, str(selected_by_group[group]), origin=group)
 
 
 def _manual_report_init_defaults() -> None:

@@ -105,6 +105,30 @@ versión no implementa un flujo de recuperación por correo ni envía invitacion
 - Rollback: detener solo el servicio portal y conservar la web anterior. No borrar
   esquemas, cuentas, imágenes ni informes para deshacer un cambio de interfaz.
 
+## Dashboard de Scouting: campogramas y vista preliminar de informes ocultos
+
+Cambios pedidos por Pablo en la reunión del 13-10-2026. Valen para Admin y Scout (ambos ya gestionan informes ocultos).
+
+**Dos campogramas.** El mapa de posiciones del Dashboard pasó de uno a dos, lado a lado: *jugadores chilenos* y *jugadores extranjeros*.
+Cada uno cuenta, por posición, los jugadores y los informes visibles de su grupo; tiene su propia selección (hacer clic en una posición
+filtra la tabla de jugadores de ese grupo, y «Limpiar filtro» solo limpia ese mapa). Los informes ocultos no cuentan, igual que antes.
+
+La nacionalidad de la ficha es texto libre (Sofascore trae «Chile»; el alta manual se escribe a mano), así que se agrupa así:
+
+| Grupo | Criterio |
+|---|---|
+| Chileno | Alguna nacionalidad es chilena: «Chile», «chilena», «CHILENO», «Chile / Argentina». La doble nacionalidad con Chile no cuenta como extranjero; las tildes y las mayúsculas no importan |
+| Extranjero | Tiene nacionalidad y ninguna es chilena |
+| Sin dato | No tiene nacionalidad. **No se supone ninguna**: no aparece en ninguno de los dos mapas y una nota debajo dice cuántos jugadores e informes quedan fuera |
+
+La suma de los tres grupos es el conteo por posición de antes (una prueba contra PostgreSQL lo comprueba). La regla vive en
+`src/scouting/services/nationality_service.py`. Si el club decide tratar la doble nacionalidad de otra manera, se cambia en un solo lugar.
+
+**Vista preliminar de informes ocultos.** El Dashboard muestra, bajo «Actividad reciente», los 5 informes ocultos más recientes
+(jugador, posición, scout, fecha, valoración, recomendación, inicio del resumen, cuándo y quién lo ocultó) y cuántos hay en total, con un
+botón para ir a *Informes ocultos*, donde se editan, restauran o eliminan. Es solo lectura. *(Se interpretó «vista preliminar» como una
+vista previa en el Dashboard; la página de gestión ya mostraba el detalle completo de cada informe.)*
+
 ## Procedencia de COMET
 
 `app/comet_dashboard.py` incorpora las cinco pantallas de dataProject/main,
