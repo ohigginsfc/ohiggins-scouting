@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from typing import Any, Iterable
+import pandas as pd
 
 CHILEAN = "chilean"
 FOREIGN = "foreign"
@@ -30,10 +31,11 @@ def _plain(text: str) -> str:
 
 def nationality_group(value: Any) -> str | None:
     """'chilean', 'foreign' o None si no hay nacionalidad."""
-    if value is None or (not isinstance(value, str) and value != value):  # None o NaN
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
         return None
     text = _plain(str(value))
-    if not text or text in {"-", "—", "sin dato", "desconocida", "desconocido", "n/a", "na"}:
+    if not text or text in {"-", "—", "sin dato", "sin datos", "sin nacionalidad", "no disponible",
+                           "desconocida", "desconocido", "n/a", "na"}:
         return None
     parts = [part.strip(" .") for part in _SEPARATORS.split(text) if part.strip(" .")]
     if not parts:
