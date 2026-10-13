@@ -161,5 +161,5 @@ jobs:
           COMET_REPORT_SMTP_USER: ${{ secrets.COMET_REPORT_SMTP_USER }}
           COMET_REPORT_SMTP_PASSWORD: ${{ secrets.COMET_REPORT_SMTP_PASSWORD }}
           COMET_REPORT_SMTP_PORT: ${{ secrets.COMET_REPORT_SMTP_PORT }}
-          STATUS: ${{ (needs.sync.result == 'success' || inputs.reports_only == true) && needs.reports.result == 'success' && 'success' || 'failure' }}
+          STATUS: ${{ (needs.sync.result == 'success' || inputs.reports_only == true) && (needs.reports.result == 'success' || (needs.reports.result == 'skipped' && vars.COMET_REPORTS_ENABLED != 'true' && inputs.reports_only != true)) && 'success' || 'failure' }}
         run: python scripts/notify_comet_run.py --status "$STATUS"
