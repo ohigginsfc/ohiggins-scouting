@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from typing import Any
 
 import plotly.graph_objects as go
@@ -157,11 +158,25 @@ def _pitch_shapes() -> list[dict[str, Any]]:
     return shapes
 
 
+DEFAULT_KEY_PREFIX = "dashboard"
+
+
+def selection_state_key(key_prefix: str = DEFAULT_KEY_PREFIX) -> str:
+    """Clave de session_state con la posición elegida en un campograma (cada mapa tiene la suya)."""
+    return f"{key_prefix}_selected_position"
+
+
+def chart_key(key_prefix: str = DEFAULT_KEY_PREFIX) -> str:
+    return f"{key_prefix}_pitch_chart"
+
+
 def build_pitch_figure(
     *,
     short_labels: dict[str, str],
     counts: dict[str, dict[str, int]],
     selected: str | None,
+    uirevision: str = "dashboard_pitch_stable",
+    height: int = 540,
 ) -> go.Figure:
     """Figura única: terreno (shapes) + marcadores (Scatter) en coords 0–105 × 0–68."""
     positions = list(PITCH_COORDS.keys())
@@ -239,7 +254,7 @@ def build_pitch_figure(
     # área útil en cada resize/rerun responsive.
     fig.update_layout(
         autosize=True,
-        height=540,
+        height=height,
         margin=dict(l=8, r=8, t=8, b=8),
         showlegend=False,
         paper_bgcolor="rgba(0,0,0,0)",
@@ -248,7 +263,7 @@ def build_pitch_figure(
         dragmode=False,
         clickmode="event+select",
         hovermode="closest",
-        uirevision="dashboard_pitch_stable",
+        uirevision=uirevision,
     )
     fig.update_xaxes(
         range=[-1.5, PITCH_LENGTH + 1.5],
@@ -307,14 +322,15 @@ def _position_from_point(point: dict[str, Any]) -> str | None:
     return None
 
 
-def apply_pitch_selection(event: Any) -> str | None:
+def apply_pitch_selection(event: Any, key_prefix: str = DEFAULT_KEY_PREFIX) -> str | None:
     """
-    Lee el evento de st.plotly_chart(..., on_select='rerun') y actualiza
-    st.session_state['dashboard_selected_position'] si hay un marcador válido.
+    Lee el evento de st.plotly_chart(..., on_select='rerun') y actualiza la posición elegida de ESE campograma
+    (st.session_state[selection_state_key(key_prefix)]) si hay un marcador válido.
     """
+    state_key = selection_state_key(key_prefix)
     points = _selection_points(event)
     if not points:
-        return st.session_state.get("dashboard_selected_position")
+        return st.session_state.get(state_key)
     # Preferir el primer punto del trace de posiciones (curveNumber 0).
     ordered = sorted(points, key=lambda p: int(p.get("curveNumber") or 0))
     for point in ordered:
@@ -322,14 +338,14 @@ def apply_pitch_selection(event: Any) -> str | None:
             continue
         position = _position_from_point(point)
         if position and position in PITCH_COORDS:
-            st.session_state["dashboard_selected_position"] = position
+            st.session_state[state_key] = position
             return position
-    return st.session_state.get("dashboard_selected_position")
+    return st.session_state.get(state_key)
 
 
-def _on_pitch_chart_select() -> None:
+def _on_pitch_chart_select(key_prefix: str = DEFAULT_KEY_PREFIX) -> None:
     """Callback Streamlit: aplica el filtro antes del resto del script (mismo rerun)."""
-    apply_pitch_selection(st.session_state.get("dashboard_pitch_chart"))
+    apply_pitch_selection(st.session_state.get(chart_key(key_prefix)), key_prefix)
 
 
 def render_interactive_pitch(
@@ -338,17 +354,28 @@ def render_interactive_pitch(
     counts: dict[str, dict[str, int]],
     selected: str | None,
     on_clear,
+    title: str = "Mapa de posiciones (scouting manual)",
+    key_prefix: str = DEFAULT_KEY_PREFIX,
+    caption: str | None = None,
+    height: int = 540,
 ) -> str | None:
     """
     Título a la izquierda; gráfico centrado; filtro vía selección Plotly (sin botones absolutos).
     Cada render construye una figura nueva (nunca se reutiliza go.Figure en session_state).
+
+    Con `key_prefix` distinto se pueden mostrar varios campogramas a la vez (por ejemplo, chilenos y extranjeros):
+    cada uno tiene su gráfico, su selección y su botón de limpiar.
     """
-    st.subheader("Mapa de posiciones (scouting manual)")
+    st.subheader(title)
+    if caption:
+        st.caption(caption)
 
     fig = build_pitch_figure(
         short_labels=short_labels,
         counts=counts,
         selected=selected,
+        uirevision=f"{key_prefix}_pitch_stable",
+        height=height,
     )
     chart_config = {
         "displayModeBar": False,
@@ -357,17 +384,15 @@ def render_interactive_pitch(
         "responsive": True,
     }
 
-    _pitch_left, pitch_center, _pitch_right = st.columns([1, 5, 1], gap="small")
-    with pitch_center:
-        st.plotly_chart(
-            fig,
-            use_container_width=True,
-            theme=None,
-            on_select=_on_pitch_chart_select,
-            selection_mode="points",
-            key="dashboard_pitch_chart",
-            config=chart_config,
-        )
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        theme=None,
+        on_select=functools.partial(_on_pitch_chart_select, key_prefix),
+        selection_mode="points",
+        key=chart_key(key_prefix),
+        config=chart_config,
+    )
 
     chip_col, clear_col = st.columns([3.5, 1.0], gap="small")
     with chip_col:
@@ -379,10 +404,10 @@ def render_interactive_pitch(
         if selected:
             st.button(
                 labeled("clear", "Limpiar filtro"),
-                key="pitch_clear_all_positions",
+                key=f"{key_prefix}_pitch_clear",
                 use_container_width=False,
                 type="secondary",
                 on_click=on_clear,
             )
 
-    return st.session_state.get("dashboard_selected_position")
+    return st.session_state.get(selection_state_key(key_prefix))

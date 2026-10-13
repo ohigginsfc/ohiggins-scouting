@@ -176,13 +176,13 @@ def build_ohiggins_css() -> str:
         font-size: 0.88rem;
         line-height: 1.3;
     }}
-    .stApp .st-key-dashboard_pitch_chart {{
+    .stApp [class*="st-key-"][class*="_pitch_chart"] {{
         width: 100%;
         max-width: 1120px;
         margin-left: auto;
         margin-right: auto;
     }}
-    .stApp .st-key-dashboard_pitch_chart [data-testid="stPlotlyChart"] {{
+    .stApp [class*="st-key-"][class*="_pitch_chart"] [data-testid="stPlotlyChart"] {{
         width: 100%;
     }}
     /* Estilos de navegación por key (no usar :has sobre VerticalBlock raíz) */
