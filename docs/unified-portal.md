@@ -3,7 +3,7 @@
 Una aplicación Streamlit con módulos COMET y Scouting. Las sincronizaciones siguen
 independientes dentro del repo unificado: COMET tiene su [importador y workflow](comet-synchronization.md);
 Sofascore conserva su worker y su procedimiento de actualización. La programación
-COMET del nuevo repo permanece desactivada hasta retirar el job del legado. No se
+COMET se activa con `COMET_SCHEDULE_ENABLED=true` después de retirar el job antiguo. No se
 mezclan las tablas deportivas ni se usa un iframe entre aplicaciones.
 
 ## Identidad y permisos
@@ -138,8 +138,9 @@ vista previa en el Dashboard; la página de gestión ya mostraba el detalle comp
 
 `app/comet_dashboard.py` incorpora las cinco pantallas de dataProject/main,
 commit `c6a0024b11b2e5b4fd3722017e08aadc101db180`, adaptadas al login común y a la
-conexión de lectura exclusiva del admin. No se importan ni duplican los automatismos
-de COMET. Los requisitos nuevos del club (partido semanal, rankings, ficha individual,
+conexión de lectura exclusiva del admin. El [importador](comet-synchronization.md), los
+[reportes y correos](comet-reports-email.md) también viven en este repo, en workers
+independientes del portal. Los requisitos nuevos del club (partido semanal, rankings, ficha individual,
 indicadores, alertas, adelantados, marcas y resumen semanal) están descritos en
 [Seguimiento deportivo COMET](comet-seguimiento-deportivo.md); leen COMET con la misma
 conexión de solo lectura y no modifican `dataProject`.

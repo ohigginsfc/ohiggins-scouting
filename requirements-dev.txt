@@ -2,4 +2,5 @@
 # Instalación: pip install -r requirements-dev.txt
 -r requirements.txt
 -r requirements-comet-sync.txt
+-r requirements-comet-reports.txt
 pytest>=8.0,<9

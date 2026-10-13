@@ -86,7 +86,7 @@ Evolución de minutos por mes o semestre ✅ (solo períodos con partidos; un me
 | Más de 2 temporadas sin promoción | 🟠 | 3 o más temporadas seguidas en la misma categoría, según el historial disponible; un hueco de temporadas corta el conteo |
 | Adelantados: quiénes, minutos, % por categoría, permanencia, comparación con su grupo de edad | 🟠 | Pantalla *Jugadores adelantados* |
 | Configurar alertas y colores | ✅ | Umbral, activación y color por alerta (el nombre siempre acompaña al color) |
-| Resúmenes y alertas semanales | 🟠 | Vista previa y descarga en pantalla; script `scripts/send_comet_weekly_digest.py` con el mismo cálculo que las pantallas y registro de entregas. **No hay envío programado ni activado** |
+| Resúmenes y alertas semanales | ✅ | Vista previa y descarga en pantalla; script `scripts/send_comet_weekly_digest.py` con el mismo cálculo y registro de entregas. Actions puede enviarlo después de sincronizar, con destinatarios confirmados y `COMET_DIGEST_ENABLED=true`; ver [operación de reportes/correos](comet-reports-email.md) |
 | Jugadores proyectados o de selección | ✅ | Desde la ficha del jugador |
 | Períodos de microciclo, Sudamericano o Mundial | ✅ | Desde la ficha; opcionalmente descuentan minutos posibles solo de partidos que el jugador no jugó (regla apagada por defecto) |
 
@@ -176,15 +176,14 @@ se informa como «en duda» para confirmarla a mano. Código de salida 1 si algo
 
 Solo se reintentan rechazos SMTP definitivos o fallos anteriores al envío. Si se pierde la conexión o la confirmación durante `send_message`, la reserva queda **en duda**: el servidor pudo aceptar el correo. No se reenvía automáticamente; el administrador debe comprobar la entrega antes de resolver la reserva.
 
-Las variables `COMET_DIGEST_SMTP_HOST`, `COMET_DIGEST_SMTP_FROM`, `COMET_DIGEST_SMTP_PORT` (587 por defecto), `COMET_DIGEST_SMTP_USER`, `COMET_DIGEST_SMTP_PASSWORD` y `COMET_DIGEST_SMTP_STARTTLS` (1 por defecto) se guardan únicamente en `.env.portal`. Compose las transmite al contenedor. Dejarlas vacías mantiene el envío deshabilitado. Después de revisar la vista previa y confirmar destinatarios, añadir `--send` al comando siguiente para enviar; sin ese argumento nunca envía.
+En ejecución manual, exportar `COMET_DIGEST_SMTP_HOST`, `COMET_DIGEST_SMTP_FROM`, `COMET_DIGEST_SMTP_PORT` (587 por defecto; 465 usa TLS implícito), `COMET_DIGEST_SMTP_USER`, `COMET_DIGEST_SMTP_PASSWORD` y `COMET_DIGEST_SMTP_STARTTLS` (1 por defecto) desde un archivo privado. Compose puede recibirlas desde `.env.portal`. Actions las configura con los secrets privados del worker, fuera del runtime web. Dejarlas vacías mantiene el envío deshabilitado. Después de revisar la vista previa y confirmar destinatarios, añadir `--send` al comando siguiente para enviar; sin ese argumento nunca envía.
 
 ```bash
 docker compose --env-file .env.portal -f docker-compose.portal.yml run --rm portal \
   python scripts/send_comet_weekly_digest.py --week-of 2026-09-21
 ```
 
-No está programado en ningún lado. Cuando Pablo confirme destinatarios, día y hora, se programa con el planificador del servidor (por ejemplo, `cron` los lunes) pasando además las variables `COMET_DIGEST_SMTP_*`.
-El resumen contiene nombres de menores: confirmar antes que el club autoriza su envío por correo.
+El workflow COMET del repo unificado lo ejecuta después de sincronizar y publicar reportes, con `COMET_DIGEST_ENABLED=true`. Usa `--quiet` para no publicar contenido deportivo en logs; la reserva semanal evita repetir el resumen el miércoles. Ver [horario, credenciales y ejecución manual](comet-reports-email.md).
 
 ## Cómo revisar
 
@@ -221,7 +220,7 @@ Cada hallazgo se reprodujo primero con datos ficticios y después se corrigió c
 | 2 | Las filas repetidas jugador/partido inflaban minutos, goles y titularidades | Se distinguen: **idénticas** se cuentan una vez; **contradictorias** no se resuelven adivinando (la fuente no trae versión ni fecha de corrección): sus valores quedan sin dato, el jugador se marca *incompleto* y sale de rankings y alertas, y el partido, el ranking, la ficha y el resumen lo avisan. Aplica también a arqueros. Detalle en *Calidad de datos* |
 | 3 | 1199/6000 = 19,98 % se mostraba como 20,0 % y no alertaba | Los porcentajes ya no se redondean en el cálculo; la alerta compara `minutos × 100 < umbral × posibles`. Solo la pantalla redondea; el detalle de la alerta trunca a 2 decimales para no mostrar «20,00 %» bajo un umbral de 20 % |
 | 4 | Excluir períodos de selección daba 175 % de participación | Numerador y denominador salen del **mismo conjunto de partidos** (`possible_grid`). Un partido dentro de un período solo se descuenta si el jugador **no lo jugó**; si lo jugó cuenta y la contradicción se avisa. No se recorta a 100 %: *Calidad de datos* avisa cualquier participación mayor a 100 %, los períodos solapados y los partidos jugados dentro de un período |
-| 5 | El resumen por correo ignoraba los períodos y podía enviarse dos veces | El script usa el mismo `pipeline` que las pantallas. Nuevo registro de entregas con reserva atómica, reintento limitado y sin reenvío ante la duda (ver arriba). No hay envío activado ni programado |
+| 5 | El resumen por correo ignoraba los períodos y podía enviarse dos veces | El script usa el mismo `pipeline` que las pantallas y registro con reserva atómica, reintento limitado y sin reenvío ante la duda. El workflow unificado incluye su envío bajo configuración explícita (ver arriba) |
 | 6 | Se declaraban ausentes datos que existen en COMET | Se leen `matchlength`, `matchstatus`, `secondyellow`, `owngoals`, `datefrom`, estatura y peso (si existen). Nuevas reglas: fuente de duración (registrada/nominal), estados de partido que no cuentan y fuente de antigüedad (primer partido/`datefrom`). `eventos_partido` figura como «sin acceso del lector», no como ausente; no se concedió ningún permiso |
 
 **Sobre el alcance de la muestra.** La alerta de más de dos temporadas sin promoción no puede certificarse con solo las temporadas 2025 y 2026: tiene implementación y pruebas sintéticas, pero su resultado real depende de un historial más largo.

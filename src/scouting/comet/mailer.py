@@ -18,6 +18,7 @@ class SmtpConfig:
     username: str = ''
     password: str = ''
     starttls: bool = True
+    implicit_tls: bool = False
 
 
 def smtp_config_from_env(env: Mapping[str, str]) -> Optional[SmtpConfig]:
@@ -29,7 +30,15 @@ def smtp_config_from_env(env: Mapping[str, str]) -> Optional[SmtpConfig]:
     return SmtpConfig(host=host, port=int(env.get('COMET_DIGEST_SMTP_PORT', '587') or 587), sender=sender,
                       username=env.get('COMET_DIGEST_SMTP_USER', '').strip(),
                       password=env.get('COMET_DIGEST_SMTP_PASSWORD', ''),
-                      starttls=env.get('COMET_DIGEST_SMTP_STARTTLS', '1') != '0')
+                      starttls=env.get('COMET_DIGEST_SMTP_STARTTLS', '1') != '0',
+                      implicit_tls=env.get('COMET_DIGEST_SMTP_SSL', '') == '1'
+                      or env.get('COMET_DIGEST_SMTP_PORT', '') == '465')
+
+
+def smtp_session(smtp, factory):
+    if smtp.implicit_tls and factory is smtplib.SMTP:
+        return smtplib.SMTP_SSL(smtp.host, smtp.port, timeout=30, context=ssl.create_default_context())
+    return factory(smtp.host, smtp.port, timeout=30)
 
 
 def build_message(digest: Digest, sender: str, recipient: str) -> EmailMessage:
@@ -61,8 +70,8 @@ def send_digest(digest: Digest, recipients: Sequence[str], smtp: SmtpConfig, *, 
     valid = valid_recipients(recipients)
     if not valid:
         raise ValueError('No hay destinatarios válidos.')
-    with smtp_factory(smtp.host, smtp.port, timeout=30) as server:
-        if smtp.starttls:
+    with smtp_session(smtp, smtp_factory) as server:
+        if smtp.starttls and not smtp.implicit_tls:
             server.starttls(context=ssl.create_default_context())
         if smtp.username:
             server.login(smtp.username, smtp.password)
@@ -128,8 +137,8 @@ def send_digest_once(digest: Digest, recipients: Sequence[str], smtp: SmtpConfig
 
     handled = set()
     try:
-        with smtp_factory(smtp.host, smtp.port, timeout=30) as server:
-            if smtp.starttls:
+        with smtp_session(smtp, smtp_factory) as server:
+            if smtp.starttls and not smtp.implicit_tls:
                 server.starttls(context=ssl.create_default_context())
             if smtp.username:
                 server.login(smtp.username, smtp.password)

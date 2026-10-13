@@ -22,6 +22,8 @@ Partido semanal y Ficha del jugador incluyen el [marcador al entrar y salir](doc
 cuando goles y cambios permiten reconstruirlo; requieren la lectura de eventos (migración 004).
 
 Consultar el [manual de cuentas, permisos y despliegue del portal](docs/unified-portal.md).
+La sincronización COMET incluye [reportes y correos automáticos](docs/comet-reports-email.md)
+en este repositorio, sin ejecutar código de `dataProject`.
 Utiliza `.env.portal` y `docker-compose.portal.yml`, con puerto local 18502 por
 defecto. La aplicación anterior se mantiene disponible para una transición en paralelo.
 
