@@ -33,11 +33,16 @@ ALL_CATEGORIES_ORDERED = [SENIOR_LABEL] + YOUTH_CATEGORIES
 
 @admin_only
 def get_db_connection():
+    from scouting.portal import readonly_pilot
+    if readonly_pilot.enabled():
+        from scouting.portal.local_pilot import validate_environment
+        validate_environment()
     dsn = os.environ.get('COMET_DATABASE_URL', '').strip()
     if not dsn:
         raise RuntimeError('Falta la conexión de lectura de COMET.')
-    return psycopg.connect(dsn, connect_timeout=10, autocommit=True,
-        options='-c default_transaction_read_only=on -c search_path=public -c statement_timeout=30000')
+    options = (readonly_pilot.connection_options('public', 30000) if readonly_pilot.enabled()
+               else '-c default_transaction_read_only=on -c search_path=public -c statement_timeout=30000')
+    return psycopg.connect(dsn, connect_timeout=10, autocommit=True, options=options)
 
 @admin_only
 def load_data(query: str, params: Optional[Dict] = None) -> pd.DataFrame:

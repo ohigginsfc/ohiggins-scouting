@@ -12,6 +12,7 @@ os.environ['DB_SCHEMA'] = 'scouting'
 
 import streamlit as st
 from scouting.portal import accounts
+from scouting.portal import readonly_pilot
 from scouting.portal.security import session_scope, require_admin
 from ui.portal_brand import inject_portal_brand, masthead, welcome, module_card, login_identity
 
@@ -115,6 +116,8 @@ def render_comet():
         'Jugadores adelantados': insights.page_adelantados,
         'Seguimiento y configuración': insights.page_tracking,
     }
+    if readonly_pilot.enabled():
+        pages.pop('Seguimiento y configuración')
     st.header('COMET · Fútbol formativo')
     st.caption('Datos federados · Acceso exclusivo de administración')
     page = st.selectbox('Sección COMET', list(pages), key='comet_section')
@@ -133,6 +136,8 @@ def render_scouting(user):
         'Datos objetivos': scouting._render_objective_explorer,
         'Informes ocultos': scouting._render_hidden_reports_page,
     }
+    if readonly_pilot.enabled():
+        pages.pop('Nuevo informe')
     current = ensure_current_page(list(pages))
     for col, name in zip(st.columns(len(pages)), pages):
         col.button(name, key=nav_button_key(name), use_container_width=True,
@@ -170,7 +175,8 @@ def main():
         if st.get_option('server.address') not in {'127.0.0.1', 'localhost', '::1'}:
             st.error('El piloto debe escuchar únicamente en localhost.')
             st.stop()
-        st.caption('Piloto local · Datos sintéticos')
+        st.caption('Piloto local · Supabase · Solo lectura' if readonly_pilot.enabled()
+                   else 'Piloto local · Datos sintéticos')
     token = st.session_state.get('portal_session')
     try:
         user = accounts.resolve_session(token)

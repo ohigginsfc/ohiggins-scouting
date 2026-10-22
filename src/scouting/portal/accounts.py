@@ -27,8 +27,13 @@ def connect():
     dsn = os.environ.get('PORTAL_AUTH_DATABASE_URL', '').strip()
     if not dsn:
         raise RuntimeError('Falta configurar la conexión privada de cuentas.')
-    return psycopg.connect(dsn, connect_timeout=10, row_factory=dict_row,
-        options='-c search_path=portal -c statement_timeout=15000')
+    from . import readonly_pilot
+    options = (readonly_pilot.connection_options('portal') if readonly_pilot.enabled()
+               else '-c search_path=portal -c statement_timeout=15000')
+    conn = psycopg.connect(dsn, connect_timeout=10, row_factory=dict_row, options=options)
+    if readonly_pilot.enabled():
+        conn.read_only = True
+    return conn
 
 
 def _auth(method, path, *, payload=None, token=None, admin=False):

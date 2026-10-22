@@ -85,3 +85,10 @@ productiva no instala estas dependencias opcionales ni incorpora las credenciale
 
 Bibliotecas: [Argon2](https://argon2-cffi.readthedocs.io/en/stable/howto.html) e
 [ItsDangerous](https://itsdangerous.palletsprojects.com/en/stable/url_safe/).
+
+## Prueba separada con datos reales
+
+El modo predeterminado descrito arriba sigue siendo sintético y rechaza la nube.
+Para la prueba explícita con Supabase en solo lectura y puerto 18504, seguir
+[el procedimiento separado](supabase-readonly-pilot.md). No basta con cambiar una
+conexión: requiere un modo explícito, roles aislados y contraseñas locales nuevas.

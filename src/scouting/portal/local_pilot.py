@@ -31,9 +31,16 @@ _hasher = PasswordHasher(time_cost=2, memory_cost=19456, parallelism=1)
 
 
 def validate_environment():
-    """The experiment cannot point at Supabase or any non-local database."""
+    """Cloud data needs a separate, explicit read-only preview mode."""
     if any(os.environ.get(key) for key in ('PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE')):
         raise RuntimeError('Retira las variables de red libpq antes de ejecutar el piloto.')
+    from . import readonly_pilot
+    mode = os.environ.get('PORTAL_PILOT_DATA_MODE', 'synthetic')
+    if readonly_pilot.enabled():
+        readonly_pilot.validate_environment()
+        return
+    if mode != 'synthetic':
+        raise RuntimeError('Modo de datos del piloto no reconocido.')
     for key in ('PORTAL_AUTH_DATABASE_URL', 'SCOUTING_DATABASE_URL', 'COMET_DATABASE_URL'):
         try:
             params = conninfo_to_dict(os.environ.get(key, ''))
@@ -76,7 +83,7 @@ def settings():
 
 
 def write_credentials(path, profiles):
-    """Provision synthetic/local profiles; caller obtains passwords interactively."""
+    """Enroll existing profile IDs locally; never create or modify database profiles."""
     path = Path(path)
     if not path.is_absolute() or path.exists():
         raise ValueError('Usa una ruta absoluta nueva para el archivo privado.')
@@ -95,7 +102,8 @@ def write_credentials(path, profiles):
 
 
 def _serializer(config):
-    return URLSafeTimedSerializer(config['secret'], salt='ohiggins-local-pilot-v1',
+    mode = os.environ.get('PORTAL_PILOT_DATA_MODE', 'synthetic')
+    return URLSafeTimedSerializer(config['secret'], salt='ohiggins-local-pilot-v1-' + mode,
                                   signer_kwargs={'digest_method': hashlib.sha256})
 
 
