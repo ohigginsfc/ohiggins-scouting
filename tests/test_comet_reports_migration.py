@@ -5,7 +5,7 @@ import sys
 import pandas as pd
 import pytest
 from scouting.comet_reports import category, job, notify, sheets
-from scouting.comet_reports.source import ReportSource
+from scouting.comet_reports.source import ReportSource, REPORT_COLUMNS
 from scouting.comet_ingest.db_pipeline.specs import SPECS
 from scouting.comet import mailer
 
@@ -90,6 +90,8 @@ def test_pagination_order_and_complete_cache(monkeypatch):
     source = ReportSource('https://example.supabase.co', 'synthetic')
     assert len(source.rows('jugadores')) == 1001
     assert get.call_args_list[0].kwargs['params']['order'] == 'personid.asc'
+    assert get.call_args_list[0].kwargs['params']['select'] == REPORT_COLUMNS['jugadores']
+    assert '*' not in get.call_args_list[0].kwargs['params']['select']
     assert get.call_args_list[1].kwargs['params']['offset'] == 1000
     assert len(source.rows('jugadores')) == 1001 and get.call_count == 2
 
@@ -128,6 +130,17 @@ def test_source_rejects_non_comet_tables_and_unknown_columns():
         source.table('portal.accounts')
     with pytest.raises(ValueError):
         source.table('jugadores').select('password')
+    with pytest.raises(ValueError):
+        source.table('jugadores').select('orgname')  # Not consumed by reports, though present in the base contract.
+
+
+def test_report_projection_covers_every_declared_calculation_column(monkeypatch):
+    source = fixture_source()
+    for table, rows in source.cache.items():
+        source.cache[table] = [{key: row[key] for key in REPORT_COLUMNS[table].split(',')} for row in rows]
+    frames = job.prepare(source, season='2026')
+    assert frames['U-18'].iloc[0]['Minutos'] == 10
+    assert len(frames['Jugadores Poco Utilizados']) == 1
 
 
 def test_sheet_empty_replace_atomic_raw_and_no_clear(monkeypatch):

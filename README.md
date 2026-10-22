@@ -24,6 +24,8 @@ cuando goles y cambios permiten reconstruirlo; requieren la lectura de eventos (
 Consultar el [manual de cuentas, permisos y despliegue del portal](docs/unified-portal.md).
 La sincronización COMET incluye [reportes y correos automáticos](docs/comet-reports-email.md)
 en este repositorio, sin ejecutar código de `dataProject`.
+Consultar el [control de transferencia de Supabase](docs/supabase-egress.md) si hay
+consumo elevado o bloqueos `exceed_egress_quota` al iniciar sesión.
 Utiliza `.env.portal` y `docker-compose.portal.yml`, con puerto local 18502 por
 defecto. La aplicación anterior se mantiene disponible para una transición en paralelo.
 
