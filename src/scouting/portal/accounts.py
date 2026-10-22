@@ -1,4 +1,4 @@
-"""Personal identities in Supabase Auth; authorization in private portal.accounts."""
+"""Supabase identities by default, optional local pilot; roles in portal.accounts."""
 import os
 import time
 import uuid
@@ -8,7 +8,22 @@ from psycopg.rows import dict_row
 import requests
 
 
+def provider():
+    value = os.environ.get('PORTAL_AUTH_PROVIDER', 'supabase').strip()
+    if value not in {'supabase', 'local_pilot'}:
+        raise RuntimeError('Proveedor de autenticación no reconocido.')
+    return value
+
+
+def _require_account_writes():
+    if provider() == 'local_pilot':
+        raise RuntimeError('El piloto no permite modificar las cuentas del portal.')
+
+
 def connect():
+    if provider() == 'local_pilot':
+        from .local_pilot import validate_environment
+        validate_environment()
     dsn = os.environ.get('PORTAL_AUTH_DATABASE_URL', '').strip()
     if not dsn:
         raise RuntimeError('Falta configurar la conexión privada de cuentas.')
@@ -17,6 +32,7 @@ def connect():
 
 
 def _auth(method, path, *, payload=None, token=None, admin=False):
+    _require_account_writes()  # A pilot never calls Supabase Auth, even by accident.
     url = os.environ.get('PORTAL_SUPABASE_URL', '').rstrip('/')
     key = os.environ.get('PORTAL_SUPABASE_SECRET_KEY' if admin else 'PORTAL_SUPABASE_PUBLISHABLE_KEY', '')
     if not url.startswith('https://') or not key:
@@ -53,6 +69,7 @@ def _validate(name, role, password=''):
 
 
 def _create(db, email, name, password, role, active=True):
+    _require_account_writes()
     _validate(name, role, password)
     if not password or '@' not in email:
         raise ValueError('Correo personal y contraseña son obligatorios.')
@@ -68,6 +85,7 @@ def _create(db, email, name, password, role, active=True):
 
 
 def bootstrap_admin(username, name, password):
+    _require_account_writes()
     with connect() as db:
         db.execute('SELECT pg_advisory_xact_lock(73219401)')
         if db.execute('SELECT count(*) AS n FROM portal.accounts').fetchone()['n']:
@@ -83,6 +101,7 @@ def list_users():
 
 
 def save_user(*, username='', name='', password='', role='scout', user_id=None, active=True):
+    _require_account_writes()
     from .security import require_admin
     actor = require_admin()
     _validate(name, role, password)
@@ -110,6 +129,9 @@ def save_user(*, username='', name='', password='', role='scout', user_id=None, 
 
 
 def authenticate(username, password):
+    if provider() == 'local_pilot':
+        from .local_pilot import authenticate as local_authenticate
+        return local_authenticate(username, password)
     try:
         result = _auth('POST', 'token?grant_type=password', payload={'email': username.strip().lower(), 'password': password})
     except ValueError:
@@ -122,6 +144,11 @@ def authenticate(username, password):
 
 
 def resolve_session(session):
+    if provider() == 'local_pilot':
+        from .local_pilot import resolve_session as local_resolve_session
+        return local_resolve_session(session)
+    if isinstance(session, dict) and session.get('provider') == 'local_pilot':
+        return None
     if not isinstance(session, dict) or session.get('expires', 0) <= time.time() or not session.get('access_token'):
         return None
     try:

@@ -33,7 +33,7 @@ def login():
             try:
                 token = accounts.authenticate(username, password)
             except Exception:
-                st.error('No se pudo iniciar sesión. Revisa la configuración de Supabase Auth con el administrador.')
+                st.error('No se pudo iniciar sesión. Revisa la configuración de acceso con el administrador.')
                 return
             if token:
                 st.session_state.clear()
@@ -49,6 +49,9 @@ def manage_accounts():
     st.caption('Cambiar permisos revoca las sesiones abiertas.')
     users = accounts.list_users()
     st.dataframe([{k: u[k] for k in ('username', 'display_name', 'role', 'active')} for u in users], hide_index=True)
+    if accounts.provider() == 'local_pilot':
+        st.info('Piloto local: administración de cuentas en solo lectura.')
+        return
     selected = st.selectbox('Cuenta', ['Nueva cuenta'] + [u['username'] for u in users])
     old = next((u for u in users if u['username'] == selected), None)
     with st.form('account_editor'):
@@ -163,11 +166,16 @@ def render_scouting(user):
 def main():
     st.set_page_config(page_title="O’Higgins · Plataforma deportiva", page_icon=str(ROOT / 'app/assets/OHigginsFC.png'), layout='wide')
     inject_portal_brand()
+    if os.environ.get('PORTAL_AUTH_PROVIDER', '').strip() == 'local_pilot':
+        if st.get_option('server.address') not in {'127.0.0.1', 'localhost', '::1'}:
+            st.error('El piloto debe escuchar únicamente en localhost.')
+            st.stop()
+        st.caption('Piloto local · Datos sintéticos')
     token = st.session_state.get('portal_session')
     try:
         user = accounts.resolve_session(token)
     except Exception:
-        st.error('No se pudo verificar la sesión. Revisa la configuración de Supabase con el administrador.')
+        st.error('No se pudo verificar la sesión. Revisa la configuración de acceso con el administrador.')
         return
     if not user:
         if token:

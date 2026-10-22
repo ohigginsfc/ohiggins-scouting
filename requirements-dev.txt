@@ -3,6 +3,7 @@
 -r requirements.txt
 -r requirements-comet-sync.txt
 -r requirements-comet-reports.txt
+-r requirements-pilot-auth.txt
 pytest>=8.0,<9
 # Exercise the native HTTP client's test network guard too (same worker version).
 curl_cffi==0.16.3

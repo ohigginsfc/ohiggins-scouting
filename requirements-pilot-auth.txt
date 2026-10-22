@@ -1,0 +1,3 @@
+# Optional: local experiment only, not installed by the production portal image.
+argon2-cffi==25.1.0
+itsdangerous==2.2.0
