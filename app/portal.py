@@ -152,7 +152,12 @@ def render_scouting(user):
                 f"{coverage['processed']}/{coverage['expected']} partidos registrados con datos importados. "
                 'Los totales excluyen los encuentros pendientes; no se cuentan como ceros.'
             )
-    pages[page]()
+    if page in {'Dashboard', 'Consultar jugador', 'Comparación', 'Datos objetivos'}:
+        from scouting.objective_cache import objective_read_scope
+        with objective_read_scope():
+            pages[page]()
+    else:
+        pages[page]()
 
 
 def main():

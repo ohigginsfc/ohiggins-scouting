@@ -9,6 +9,7 @@ from uuid import UUID
 from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
+from scouting.objective_cache import cached_objective_read
 
 from scouting.config.metric_direction import (
     COHORT_RADAR_SCALE_P_HIGH,
@@ -855,6 +856,7 @@ def get_objective_players_summary(
         return list(cur.fetchall())
 
 
+@cached_objective_read
 def get_objective_metrics_for_player_block(
     conn: Connection,
     player_id: int,
@@ -1036,6 +1038,7 @@ def _cohort_season_sql(
     return "om.season IS NOT DISTINCT FROM %s", [season]
 
 
+@cached_objective_read
 def count_objective_comparison_cohort(
     conn: Connection,
     player_id: int,
@@ -1099,6 +1102,7 @@ def count_objective_comparison_cohort(
     return len(peers)
 
 
+@cached_objective_read
 def get_player_vs_position_average(
     conn: Connection,
     player_id: int,
@@ -1272,6 +1276,7 @@ def _unambiguous_observations(rows: list[dict[str, Any]], keys: tuple[str, ...])
     return result
 
 
+@cached_objective_read
 def get_player_vs_position_percentiles(
     conn: Connection,
     player_id: int,
@@ -1456,6 +1461,7 @@ def get_player_vs_position_percentiles(
     return out, cohort_peer_count
 
 
+@cached_objective_read
 def get_position_group_percentile_averages(
     conn: Connection,
     player_id: int,

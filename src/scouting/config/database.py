@@ -12,7 +12,8 @@ from dotenv import load_dotenv
 # Local (fuera de Compose): carga .env si falta alguna variable.
 # En Docker, Compose ya inyecta DB_* vía interpolación; override=False no las pisa.
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
-load_dotenv(_PROJECT_ROOT / ".env", override=False)
+if os.environ.get('SCOUTING_TEST_MODE') != '1':
+    load_dotenv(_PROJECT_ROOT / ".env", override=False)
 
 
 def get_db_connection_params() -> dict[str, object]:
