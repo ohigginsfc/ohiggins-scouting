@@ -4,9 +4,21 @@ import os
 import re
 from types import SimpleNamespace
 import requests
-from scouting.comet_ingest.publisher import Publisher, TABLES
+from scouting.comet_ingest.publisher import Publisher
 from scouting.comet_ingest.db_pipeline.specs import SPECS
 from .errors import ReportError
+
+
+# Union of the fields used by category.py and alerts.py. Never fetch the full
+# production row just to discard columns in Python afterwards.
+REPORT_COLUMNS = {
+    'equipos': 'clubid,club,clublongname',
+    'jugadores': 'personid,firstname,lastname,displayname,dateofbirth,gender,nationality,country,height,weight,datefrom',
+    'competiciones': 'id,name,season,category,matchlength,playermaxage,playerminage,parentcompetitionid',
+    'partidos': 'matchid,id,hometeam,awayteam,matchdate,matchstatus',
+    'actuaciones_jugadores': 'personid,clubid,id,matchid,startinglineup,played,minutesplayed,singleyellow,secondyellow,redcards,result,goals,home',
+    'actuaciones_arqueros': 'personid,clubid,id,matchid,startinglineup,played,minutesplayed,goalsconceded,goals',
+}
 
 
 class ReportSource:
@@ -20,11 +32,13 @@ class ReportSource:
                    os.environ.get('COMET_SUPABASE_SERVICE_ROLE_KEY', ''))
 
     def table(self, name):
-        if name not in TABLES:
+        if name not in REPORT_COLUMNS:
             raise ValueError('Tabla fuera del ámbito COMET')
         return ReadQuery(self, name)
 
     def rows(self, name):
+        if name not in REPORT_COLUMNS:
+            raise ValueError('Tabla fuera del ámbito de reportes COMET')
         if name in self.cache:
             return self.cache[name]
         rows, offset, expected_total = [], 0, None
@@ -37,7 +51,7 @@ class ReportSource:
                 response = None
                 try:
                     response = requests.get(f'{self.transport.url}/rest/v1/{name}',
-                        params={'select': '*', 'order': order, 'limit': 1000, 'offset': offset},
+                        params={'select': REPORT_COLUMNS[name], 'order': order, 'limit': 1000, 'offset': offset},
                         headers={'apikey': self.transport.key, 'Authorization': f'Bearer {self.transport.key}',
                                  'Accept-Profile': 'public', 'Prefer': 'count=exact'}, timeout=(10, 60))
                 except (requests.Timeout, requests.ConnectionError):
@@ -83,7 +97,7 @@ class ReadQuery:
         self.columns, self.start, self.end = [], 0, 999
 
     def select(self, columns):
-        allowed = {column.lower() for column in SPECS[self.name].cols}
+        allowed = set(REPORT_COLUMNS[self.name].split(','))
         self.columns = columns.split(',')
         if set(self.columns) - allowed:
             raise ValueError('Columnas fuera del contrato COMET')

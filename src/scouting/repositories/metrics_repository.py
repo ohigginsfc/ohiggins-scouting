@@ -938,6 +938,29 @@ def _objective_position_from_row(row: dict[str, Any], *, source_name: str) -> st
     return standardize_sofascore_position(str(raw_pos) if raw_pos else None)
 
 
+def _objective_payload_sql(*, with_team: bool = False) -> str:
+    """Keep only fields consumed by cohort calculations; retain the original JSON in storage.
+
+    Python still resolves positions with its existing precedence and normalization. In
+    particular, a manual scouting position must never become an objective fallback.
+    DISTINCT over this projection also collapses the per-metric copies of a player.
+    """
+    position = """jsonb_strip_nulls(jsonb_build_object(
+        'sofascore_position', om.raw_payload->'sofascore_position',
+        'original_position', om.raw_payload->'original_position',
+        'raw_row', jsonb_build_object('position', om.raw_payload#>'{raw_row,position}')
+    ))"""
+    if not with_team:
+        return position
+    # Do not recursively strip team values: preserve the existing Python truthiness
+    # and display behavior even for malformed non-string source labels.
+    return position + """ || jsonb_build_object(
+        'objective_team', om.raw_payload->'objective_team',
+        'team_name', om.raw_payload->'team_name',
+        'team', om.raw_payload->'team'
+    )"""
+
+
 def _cohort_origin_sql(
     conn: Connection,
     *,
@@ -1056,7 +1079,7 @@ def count_objective_comparison_cohort(
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             f"""
-            SELECT DISTINCT om.player_id, p.position, om.raw_payload
+            SELECT DISTINCT om.player_id, {_objective_payload_sql()} AS raw_payload
             FROM objective_metrics om
             INNER JOIN players p ON p.id = om.player_id
             WHERE {cohort_where}
@@ -1151,7 +1174,7 @@ def get_player_vs_position_average(
             SELECT
                 om.player_id,
                 p.position AS player_position,
-                om.raw_payload,
+                {_objective_payload_sql()} AS raw_payload,
                 om.metric_name,
                 om.metric_value::numeric AS metric_value
             FROM objective_metrics om
@@ -1358,7 +1381,7 @@ def get_player_vs_position_percentiles(
                 om.player_id,
                 p.full_name AS player_name,
                 p.position AS player_position,
-                om.raw_payload,
+                {_objective_payload_sql(with_team=True)} AS raw_payload,
                 om.metric_name, om.season, om.competition, om.metric_unit,
                 om.metric_value::numeric AS metric_value
             FROM objective_metrics om
@@ -1485,7 +1508,7 @@ def get_position_group_percentile_averages(
             SELECT
                 om.player_id,
                 p.position AS player_position,
-                om.raw_payload,
+                {_objective_payload_sql()} AS raw_payload,
                 om.metric_name,
                 om.metric_value::numeric AS metric_value
             FROM objective_metrics om
