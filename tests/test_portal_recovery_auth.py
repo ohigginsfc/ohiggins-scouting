@@ -158,7 +158,9 @@ def test_recovery_compose_uses_private_mount_persistent_limiter_and_no_auth_or_m
     assert env['PORTAL_AUTH_PROVIDER'] == 'local_recovery' and env['PORTAL_RECOVERY_ENABLED'] == '1'
     assert not any('SUPABASE_SECRET' in k or 'SMTP' in k for k in env)
     credential_mount = portal['volumes'][0]
-    assert credential_mount['read_only'] and credential_mount['bind']['create_host_path'] is False
+    # Compose versions may omit false fields when normalizing to JSON.
+    assert credential_mount['read_only']
+    assert credential_mount.get('bind', {}).get('create_host_path', False) is False
     assert any(v.get('source') == 'portal_recovery_state' and v['target'] == '/var/lib/ohiggins-auth'
                for v in portal['volumes'])
     assert portal['build']['args']['INSTALL_ARGON2'] == '1'
