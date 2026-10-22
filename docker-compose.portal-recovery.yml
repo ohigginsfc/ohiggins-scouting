@@ -1,0 +1,58 @@
+# Recovery replaces the same portal service; never run two replicas on one port.
+name: ohiggins-portal
+x-recovery-environment: &recovery-environment
+  PYTHONPATH: /app/src
+  PORTAL_MODE: "1"
+  SCOUTING_TEST_MODE: "1" # No automatic loading of a checkout .env.
+  PORTAL_AUTH_PROVIDER: local_recovery
+  PORTAL_RECOVERY_ENABLED: "1"
+  PORTAL_RECOVERY_SCOUTING_WRITES: ${PORTAL_RECOVERY_SCOUTING_WRITES:-0}
+  PORTAL_RECOVERY_SUPABASE_PROJECT: ${PORTAL_RECOVERY_SUPABASE_PROJECT:?Project reference required}
+  PORTAL_RECOVERY_CREDENTIALS: /run/secrets/portal-recovery.json
+  PORTAL_RECOVERY_STATE_DIR: /var/lib/ohiggins-auth
+  PORTAL_AUTH_DATABASE_URL: ${PORTAL_AUTH_DATABASE_URL:?Private account connection required}
+  SCOUTING_DATABASE_URL: ${SCOUTING_DATABASE_URL:?Scouting connection required}
+  COMET_DATABASE_URL: ${COMET_DATABASE_URL:?Read-only COMET connection required}
+  DB_SCHEMA: scouting
+  SOFASCORE_ACTIVE_SEASON: "2026"
+  SOFASCORE_HISTORICAL_SEASON: "2025"
+  DISABLE_SOFASCORE_UPDATE: "1"
+x-recovery-build: &recovery-build
+  context: .
+  dockerfile: docker/Dockerfile.portal
+  args:
+    INSTALL_ARGON2: "1"
+
+services:
+  portal:
+    build: *recovery-build
+    restart: unless-stopped
+    ports:
+      - "${PORTAL_BIND_ADDRESS:-127.0.0.1}:${PORTAL_PORT:-18502}:8501"
+    environment: *recovery-environment
+    volumes:
+      - type: bind
+        source: ${PORTAL_RECOVERY_CREDENTIALS_FILE:-./.local_checks/portal-recovery/credentials.private.json}
+        target: /run/secrets/portal-recovery.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - portal_recovery_state:/var/lib/ohiggins-auth
+      - ./data/images:/app/data/images
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  provision-recovery:
+    build: *recovery-build
+    profiles: ["setup"]
+    environment: *recovery-environment
+    volumes:
+      - ./.local_checks/portal-recovery:/output
+    entrypoint: ["python", "scripts/create_portal_recovery_credentials.py", "--output", "/output/credentials.private.json"]
+    stdin_open: true
+    tty: true
+
+volumes:
+  portal_recovery_state:

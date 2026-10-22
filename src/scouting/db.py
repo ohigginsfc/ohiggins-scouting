@@ -27,7 +27,7 @@ def get_connection() -> Connection:
         params['options'] = readonly_pilot.connection_options('scouting')
     conn = psycopg.connect(**params)
     if readonly_pilot.enabled():
-        conn.read_only = True
+        conn.read_only = not readonly_pilot.scouting_writes()
     schema = os.environ.get("DB_SCHEMA", "").strip()
     if schema:
         try:

@@ -50,6 +50,10 @@ jobs:
       - run: python -m pytest -q
       - name: Build unified portal
         run: docker build -f docker/Dockerfile.portal -t ohiggins-portal:test .
+      - name: Build portal recovery image
+        run: |
+          docker build -f docker/Dockerfile.portal --build-arg INSTALL_ARGON2=1 -t ohiggins-portal:recovery-test .
+          docker run --rm --entrypoint python ohiggins-portal:recovery-test -c "import argon2, itsdangerous; from scouting.portal import recovery_auth"
       - name: Build isolated recovery worker and check Selenium
         env:
           SOFASCORE_ARTIFACT_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=

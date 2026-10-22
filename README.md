@@ -22,8 +22,12 @@ Partido semanal y Ficha del jugador incluyen el [marcador al entrar y salir](doc
 cuando goles y cambios permiten reconstruirlo; requieren la lectura de eventos (migración 004).
 
 Consultar el [manual de cuentas, permisos y despliegue del portal](docs/unified-portal.md).
-Experimento opcional: [piloto local de autenticación alternativa](docs/local-auth-pilot.md),
-aislado de Supabase y de producción; no cambia el proveedor de acceso por defecto.
+Si Auth no responde pero PostgreSQL sí, existe un [modo de recuperación para el
+servidor](docs/portal-recovery.md), con los mismos perfiles y
+credenciales verificadas localmente. Se activa explícitamente con otro Compose;
+permite habilitar la creación/edición de informes de scouting, manteniendo COMET
+y cuentas en solo lectura. Supabase Auth sigue siendo el proveedor habitual. Se conserva el
+[piloto local aislado](docs/local-auth-pilot.md).
 La sincronización COMET incluye [reportes y correos automáticos](docs/comet-reports-email.md)
 en este repositorio, sin ejecutar código de `dataProject`.
 Consultar el [control de transferencia de Supabase](docs/supabase-egress.md) si hay

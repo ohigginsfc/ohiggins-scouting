@@ -42,7 +42,10 @@ def get_db_connection():
         raise RuntimeError('Falta la conexión de lectura de COMET.')
     options = (readonly_pilot.connection_options('public', 30000) if readonly_pilot.enabled()
                else '-c default_transaction_read_only=on -c search_path=public -c statement_timeout=30000')
-    return psycopg.connect(dsn, connect_timeout=10, autocommit=True, options=options)
+    conn = psycopg.connect(dsn, connect_timeout=10, autocommit=not readonly_pilot.enabled(), options=options)
+    if readonly_pilot.enabled():
+        conn.read_only = True
+    return conn
 
 @admin_only
 def load_data(query: str, params: Optional[Dict] = None) -> pd.DataFrame:

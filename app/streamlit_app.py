@@ -666,8 +666,8 @@ def _dashboard_flash_pop() -> None:
 
 def _render_visible_reports_management(reports: list[dict[str, Any]]) -> None:
     """Editar recomendación / ocultar / eliminar sobre informes visibles del dashboard."""
-    from scouting.portal.readonly_pilot import enabled
-    if enabled():
+    from scouting.portal.readonly_pilot import scouting_readonly
+    if scouting_readonly():
         return
     if not reports:
         empty_state(
@@ -806,7 +806,7 @@ def _render_hidden_reports_page() -> None:
     if os.environ.get('PORTAL_MODE') == '1':
         from scouting.portal.security import require_user
         require_user()
-    from scouting.portal.readonly_pilot import enabled as readonly_preview
+    from scouting.portal.readonly_pilot import scouting_readonly as readonly_preview
     st.caption('Consulta de informes ocultos.' if readonly_preview()
                else 'Edita, restaura o elimina informes ocultos.')
 
@@ -1098,7 +1098,7 @@ def _render_dashboard() -> None:
     if os.environ.get('PORTAL_MODE') != '1':
         render_data_sync_card(key_prefix='dashboard')
 
-    from scouting.portal.readonly_pilot import enabled as readonly_preview
+    from scouting.portal.readonly_pilot import scouting_readonly as readonly_preview
     if not readonly_preview():
         section_header(
             "Gestión de informes",
@@ -1161,8 +1161,8 @@ def _apply_pending_manual_report_reset() -> None:
 
 
 def _render_new_report() -> None:
-    from scouting.portal.readonly_pilot import require_writable
-    require_writable()
+    from scouting.portal.readonly_pilot import require_scouting_writable
+    require_scouting_writable()
     # Reset diferido: limpiar claves de widgets ANTES de crearlos.
     _apply_pending_manual_report_reset()
     _manual_report_init_defaults()

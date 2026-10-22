@@ -1,4 +1,4 @@
-"""Loopback-only authentication experiment; never a fallback after a cloud error.
+"""Shared file-credential engine; explicit pilot/recovery providers, never fallback.
 
 Credentials live in a private local file. Roles/active/revision remain authoritative
 in portal.accounts. The pilot cannot create or modify those profiles.
@@ -34,6 +34,11 @@ def validate_environment():
     """Cloud data needs a separate, explicit read-only preview mode."""
     if any(os.environ.get(key) for key in ('PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE')):
         raise RuntimeError('Retira las variables de red libpq antes de ejecutar el piloto.')
+    from .accounts import provider
+    if provider() == 'local_recovery':
+        from .recovery_auth import validate_environment as validate_recovery
+        validate_recovery()
+        return
     from . import readonly_pilot
     mode = os.environ.get('PORTAL_PILOT_DATA_MODE', 'synthetic')
     if readonly_pilot.enabled():
@@ -56,9 +61,13 @@ def validate_environment():
 
 def settings():
     validate_environment()
-    path = Path(os.environ.get('PORTAL_PILOT_CREDENTIALS', ''))
+    from .accounts import provider
+    recovery = provider() == 'local_recovery'
+    path = Path(os.environ.get('PORTAL_RECOVERY_CREDENTIALS' if recovery else 'PORTAL_PILOT_CREDENTIALS', ''))
     try:
         if not path.is_absolute() or path.stat().st_size > 65536:
+            raise ValueError()
+        if recovery and os.name != 'nt' and path.stat().st_mode & 0o077:
             raise ValueError()
         config = json.loads(path.read_text(encoding='utf-8'))
         if config.get('version') != 1 or not isinstance(config['secret'], str) or len(config['secret']) < 43:
@@ -78,7 +87,7 @@ def settings():
             ids.add(uid)
             emails.add(email)
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        raise RuntimeError('Configura el archivo privado de credenciales del piloto.') from None
+        raise RuntimeError('Configura el archivo privado de credenciales y sus permisos.') from None
     return config
 
 
@@ -102,8 +111,10 @@ def write_credentials(path, profiles):
 
 
 def _serializer(config):
+    from .accounts import provider
     mode = os.environ.get('PORTAL_PILOT_DATA_MODE', 'synthetic')
-    return URLSafeTimedSerializer(config['secret'], salt='ohiggins-local-pilot-v1-' + mode,
+    salt = 'ohiggins-recovery-v1' if provider() == 'local_recovery' else 'ohiggins-local-pilot-v1-' + mode
+    return URLSafeTimedSerializer(config['secret'], salt=salt,
                                   signer_kwargs={'digest_method': hashlib.sha256})
 
 
@@ -135,14 +146,18 @@ def _reserve_attempt(username):
 
 
 def authenticate(username, password):
-    from .accounts import get_user
+    from .accounts import get_user, provider
     config = settings()
     if not isinstance(username, str) or not isinstance(password, str):
         return None
     username = username.strip().lower()
     if len(username) > 254 or not 1 <= len(password) <= 128:
         return None
-    attempt = _reserve_attempt(username)
+    if provider() == 'local_recovery':
+        from .recovery_auth import reserve_attempt
+        attempt = reserve_attempt(username, config['secret'])
+    else:
+        attempt = _reserve_attempt(username)
     if attempt is None:
         return None
     entry = next((e for e in config['accounts'] if e['email'] == username), None)
@@ -157,15 +172,18 @@ def authenticate(username, password):
         return None
     with _lock:
         _attempts.pop(attempt, None)
+    if provider() == 'local_recovery':
+        from .recovery_auth import clear_user_attempts
+        clear_user_attempts(username, config['secret'])
     payload = dict(id=profile['id'], revision=profile['revision'],
                    credential=_credential_digest(entry), nonce=secrets.token_urlsafe(24))
-    return dict(provider='local_pilot', id=profile['id'], revision=profile['revision'],
+    return dict(provider=provider(), id=profile['id'], revision=profile['revision'],
                 local_token=_serializer(config).dumps(payload), expires=time.time() + LIFETIME)
 
 
 def resolve_session(session):
-    from .accounts import get_user
-    if (not isinstance(session, dict) or session.get('provider') != 'local_pilot'
+    from .accounts import get_user, provider
+    if (not isinstance(session, dict) or session.get('provider') != provider()
             or not isinstance(session.get('local_token'), str)
             or len(session['local_token']) > 4096
             or not isinstance(session.get('expires'), (int, float))

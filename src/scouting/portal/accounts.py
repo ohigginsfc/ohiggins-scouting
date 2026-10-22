@@ -10,18 +10,18 @@ import requests
 
 def provider():
     value = os.environ.get('PORTAL_AUTH_PROVIDER', 'supabase').strip()
-    if value not in {'supabase', 'local_pilot'}:
+    if value not in {'supabase', 'local_pilot', 'local_recovery'}:
         raise RuntimeError('Proveedor de autenticación no reconocido.')
     return value
 
 
 def _require_account_writes():
-    if provider() == 'local_pilot':
+    if provider() != 'supabase':
         raise RuntimeError('El piloto no permite modificar las cuentas del portal.')
 
 
 def connect():
-    if provider() == 'local_pilot':
+    if provider() in {'local_pilot', 'local_recovery'}:
         from .local_pilot import validate_environment
         validate_environment()
     dsn = os.environ.get('PORTAL_AUTH_DATABASE_URL', '').strip()
@@ -134,7 +134,7 @@ def save_user(*, username='', name='', password='', role='scout', user_id=None, 
 
 
 def authenticate(username, password):
-    if provider() == 'local_pilot':
+    if provider() in {'local_pilot', 'local_recovery'}:
         from .local_pilot import authenticate as local_authenticate
         return local_authenticate(username, password)
     try:
@@ -149,10 +149,10 @@ def authenticate(username, password):
 
 
 def resolve_session(session):
-    if provider() == 'local_pilot':
+    if provider() in {'local_pilot', 'local_recovery'}:
         from .local_pilot import resolve_session as local_resolve_session
         return local_resolve_session(session)
-    if isinstance(session, dict) and session.get('provider') == 'local_pilot':
+    if isinstance(session, dict) and session.get('provider') in {'local_pilot', 'local_recovery'}:
         return None
     if not isinstance(session, dict) or session.get('expires', 0) <= time.time() or not session.get('access_token'):
         return None

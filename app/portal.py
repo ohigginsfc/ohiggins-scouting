@@ -50,8 +50,8 @@ def manage_accounts():
     st.caption('Cambiar permisos revoca las sesiones abiertas.')
     users = accounts.list_users()
     st.dataframe([{k: u[k] for k in ('username', 'display_name', 'role', 'active')} for u in users], hide_index=True)
-    if accounts.provider() == 'local_pilot':
-        st.info('Piloto local: administración de cuentas en solo lectura.')
+    if accounts.provider() != 'supabase':
+        st.info('Administración de cuentas en solo lectura.')
         return
     selected = st.selectbox('Cuenta', ['Nueva cuenta'] + [u['username'] for u in users])
     old = next((u for u in users if u['username'] == selected), None)
@@ -136,7 +136,7 @@ def render_scouting(user):
         'Datos objetivos': scouting._render_objective_explorer,
         'Informes ocultos': scouting._render_hidden_reports_page,
     }
-    if readonly_pilot.enabled():
+    if readonly_pilot.scouting_readonly():
         pages.pop('Nuevo informe')
     current = ensure_current_page(list(pages))
     for col, name in zip(st.columns(len(pages)), pages):
@@ -177,6 +177,9 @@ def main():
             st.stop()
         st.caption('Piloto local · Supabase · Solo lectura' if readonly_pilot.enabled()
                    else 'Piloto local · Datos sintéticos')
+    elif os.environ.get('PORTAL_AUTH_PROVIDER', '').strip() == 'local_recovery':
+        st.caption('Modo recuperación · Scouting operativo' if readonly_pilot.scouting_writes()
+                   else 'Modo recuperación · Solo consulta')
     token = st.session_state.get('portal_session')
     try:
         user = accounts.resolve_session(token)
