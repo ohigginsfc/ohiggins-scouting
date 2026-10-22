@@ -6,6 +6,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from scouting import sofascore_recovery as r
+from tests.safety import synthetic_http_server
 
 
 def check_headers_on_wire():
@@ -25,7 +26,8 @@ def check_headers_on_wire():
     thread.start()
     client = r.HttpTransport()
     try:
-        response = client._request(f'http://127.0.0.1:{server.server_port}/')
+        with synthetic_http_server(server):
+            response = client._request(f'http://127.0.0.1:{server.server_port}/')
         headers = {k.lower(): v for k, v in json.loads(response['body']).items()}
         assert response['status'] == 200
         assert 'Chrome/150.' in headers['user-agent']

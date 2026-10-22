@@ -23,6 +23,64 @@ no usar `select=*` como solución a una columna ausente.
 
 ## Operación
 
+### Caché del portal
+
+Las pantallas de lectura de scouting reutilizan durante **15 minutos** los bloques
+objetivos de un jugador y los resultados de conteos, promedios y percentiles de sus
+cohortes. Se guardan como máximo **128 entradas** en memoria del proceso, sin
+persistencia en disco. Cambiar de jugador, temporada, competición, métricas, origen
+o ámbito de comparación utiliza una entrada diferente. La conexión real (servidor,
+BD, rol y opciones de esquema) también forma parte de la clave.
+
+La sesión se comprueba **antes de cada acceso**, incluso si el resultado está en
+caché. No se cachean sesiones, permisos, informes subjetivos ni escrituras. COMET
+conserva su caché de diez minutos y su acceso exclusivo de administración. Los
+workers e importadores no activan la caché del portal.
+
+Después de una sincronización, las pantallas pueden conservar el resultado anterior
+hasta que caduque esa entrada, como máximo quince minutos desde su carga. Reiniciar
+el contenedor del portal vacía su caché. Cada réplica o demo tiene su propia caché;
+no comparte memoria con otros procesos, aunque todos usen la misma BD y cuota.
+
+### Pruebas sin consumo de producción
+
+Ejecutar la suite desde la raíz del repositorio:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+El `conftest.py` de la raíz instala el aislamiento **antes de recopilar las pruebas**:
+retira las variables de credenciales heredadas, desactiva la carga de `.env`, bloquea
+HTTP real de `requests` y `curl_cffi`, y bloquea conexiones de socket externas. Las
+respuestas de proveedores se simulan en las pruebas. Los socketpairs locales siguen
+habilitados para que funcionen los bucles de eventos de Streamlit.
+La prueba de cabeceras HTTP habilita únicamente el puerto de su propio servidor
+sintético mientras lo utiliza, sin seguir redirecciones. No habilita el acceso al
+dashboard local ni a ningún servicio externo.
+
+PostgreSQL solo admite un destino explícito loopback (`localhost`, `127.0.0.1` o
+`::1`) y una base llamada **`scouting_test`**, mediante las conexiones de `psycopg`.
+La suite nunca toma `SCOUTING_DATABASE_URL` como sustituto de su conexión de pruebas.
+Si no se configura `SCOUTING_TEST_DATABASE_URL`, se omiten los casos de integración
+PostgreSQL. Si esa variable apunta a otro destino, se aborta antes de recopilar.
+
+Para los casos PostgreSQL, crear primero una instancia local desechable o utilizar
+el servicio sintético de GitHub Actions. Ejemplo para una instancia local ya creada:
+
+```bash
+SCOUTING_TEST_DATABASE_URL='postgresql://scouting_test:synthetic-test-password@127.0.0.1:5432/scouting_test' python -m pytest -q
+```
+
+En PowerShell, asignar la variable con `$env:SCOUTING_TEST_DATABASE_URL='...'` y
+ejecutar `python -m pytest -q` después. No utilizar credenciales productivas ni
+`.env.portal`. Estas protecciones corresponden al proceso de pytest; no convierten
+un navegador, script de diagnóstico o contenedor iniciado por separado en un entorno
+aislado. Una demostración conectada a Supabase sigue consumiendo transferencia.
+
+### Seguimiento del consumo
+
 1. En la organización de Supabase, consultar **Usage → Egress** para el ciclo vigente.
    El tooltip de cada día distingue Shared Pooler, PostgREST, Auth y otros servicios.
 2. Shared Pooler incluye las consultas PostgreSQL del servidor, demos locales y procesos
