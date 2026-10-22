@@ -1,13 +1,30 @@
 """Fail closed before test collection: no production secrets, SQL or HTTP."""
 from functools import wraps
+from contextlib import contextmanager
+from contextvars import ContextVar
+from http.server import HTTPServer
 import inspect
 import os
 import socket
+from urllib.parse import urlsplit
 
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
 
 LOOPBACK = {'localhost', '127.0.0.1', '::1'}
+_http_origin = ContextVar('synthetic_http_origin', default=None)
+
+
+@contextmanager
+def synthetic_http_server(server):
+    """Opt in to an actual test-owned HTTPServer, never arbitrary localhost URLs."""
+    if not isinstance(server, HTTPServer) or server.server_address[0] not in LOOPBACK:
+        raise RuntimeError('Only a test-owned loopback HTTPServer can be enabled.')
+    token = _http_origin.set(('http', server.server_address[0], server.server_port))
+    try:
+        yield
+    finally:
+        _http_origin.reset(token)
 
 
 def validate_test_database(conninfo='', **kwargs):
@@ -63,18 +80,28 @@ def install_guards(patch):
     # psycopg.connect is an alias; also cover callers using Connection.connect.
     patch.setattr(psycopg.Connection, 'connect', staticmethod(connect))
 
-    def no_http(*args, **kwargs):
-        raise RuntimeError('HTTP is disabled in tests; mock the provider response.')
+    def http_guard(original):
+        @wraps(original)
+        def request(*args, **kwargs):
+            url = kwargs.get('url') or (args[2] if len(args) > 2 else '')
+            parsed = urlsplit(url)
+            origin = (parsed.scheme, parsed.hostname, parsed.port)
+            if _http_origin.get() is None or origin != _http_origin.get():
+                raise RuntimeError('HTTP is disabled in tests; mock the provider response.')
+            # A test echo server must not redirect the native client outside its scope.
+            kwargs['allow_redirects'] = False
+            return original(*args, **kwargs)
+        return request
 
     import requests
-    patch.setattr(requests.sessions.Session, 'request', no_http)
+    patch.setattr(requests.sessions.Session, 'request', http_guard(requests.sessions.Session.request))
     try:
         from curl_cffi import requests as curl_requests
     except ImportError:
         pass
     else:
-        patch.setattr(curl_requests.Session, 'request', no_http)
-        patch.setattr(curl_requests.AsyncSession, 'request', no_http)
+        patch.setattr(curl_requests.Session, 'request', http_guard(curl_requests.Session.request))
+        patch.setattr(curl_requests.AsyncSession, 'request', http_guard(curl_requests.AsyncSession.request))
 
     original_connect, original_connect_ex = socket.socket.connect, socket.socket.connect_ex
 

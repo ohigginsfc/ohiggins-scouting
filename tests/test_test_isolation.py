@@ -2,11 +2,13 @@ import os
 import socket
 import subprocess
 import sys
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import psycopg
 import pytest
 import requests
-from tests.safety import isolate_environment, validate_test_database
+from tests.safety import isolate_environment, validate_test_database, synthetic_http_server
 
 
 @pytest.mark.parametrize('dsn', [
@@ -39,6 +41,32 @@ def test_native_curl_is_also_disabled_when_installed():
     curl_requests = pytest.importorskip('curl_cffi.requests')
     with pytest.raises(RuntimeError, match='HTTP is disabled'):
         curl_requests.get('http://127.0.0.1:18502/')
+
+
+def test_only_test_owned_server_is_allowed_without_redirects():
+    class Redirect(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header('Location', 'https://example.invalid/')
+            self.end_headers()
+        def log_message(self, *args):
+            pass
+    server = HTTPServer(('127.0.0.1', 0), Redirect)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f'http://127.0.0.1:{server.server_port}/'
+    try:
+        with synthetic_http_server(server):
+            response = requests.get(url, allow_redirects=True)
+            assert response.status_code == 302 and response.history == []
+            with pytest.raises(RuntimeError, match='HTTP is disabled'):
+                requests.get('http://127.0.0.1:18502/')
+        with pytest.raises(RuntimeError, match='HTTP is disabled'):
+            requests.get(url)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def test_private_dotenv_is_not_loaded(tmp_path):

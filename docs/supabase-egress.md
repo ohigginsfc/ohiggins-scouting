@@ -56,6 +56,9 @@ retira las variables de credenciales heredadas, desactiva la carga de `.env`, bl
 HTTP real de `requests` y `curl_cffi`, y bloquea conexiones de socket externas. Las
 respuestas de proveedores se simulan en las pruebas. Los socketpairs locales siguen
 habilitados para que funcionen los bucles de eventos de Streamlit.
+La prueba de cabeceras HTTP habilita únicamente el puerto de su propio servidor
+sintético mientras lo utiliza, sin seguir redirecciones. No habilita el acceso al
+dashboard local ni a ningún servicio externo.
 
 PostgreSQL solo admite un destino explícito loopback (`localhost`, `127.0.0.1` o
 `::1`) y una base llamada **`scouting_test`**, mediante las conexiones de `psycopg`.
