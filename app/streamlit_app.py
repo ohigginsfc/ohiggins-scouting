@@ -666,6 +666,9 @@ def _dashboard_flash_pop() -> None:
 
 def _render_visible_reports_management(reports: list[dict[str, Any]]) -> None:
     """Editar recomendación / ocultar / eliminar sobre informes visibles del dashboard."""
+    from scouting.portal.readonly_pilot import scouting_readonly
+    if scouting_readonly():
+        return
     if not reports:
         empty_state(
             "Todavía no hay informes disponibles.",
@@ -803,7 +806,9 @@ def _render_hidden_reports_page() -> None:
     if os.environ.get('PORTAL_MODE') == '1':
         from scouting.portal.security import require_user
         require_user()
-    st.caption("Edita, restaura o elimina informes ocultos.")
+    from scouting.portal.readonly_pilot import scouting_readonly as readonly_preview
+    st.caption('Consulta de informes ocultos.' if readonly_preview()
+               else 'Edita, restaura o elimina informes ocultos.')
 
     with get_connection() as conn:
         hidden = fetch_hidden_reports(conn, limit=200)
@@ -872,6 +877,8 @@ def _render_hidden_reports_page() -> None:
         st.dataframe(pd.DataFrame(ratings)[['attribute_group', 'attribute_name', 'rating', 'max_rating', 'notes']],
                      use_container_width=True, hide_index=True)
 
+    if readonly_preview():
+        return
     with st.form(f'hidden_edit_report_{report_id}'):
         current_rec = report.get('recommendation')
         rec_index = list(RECOMMENDATION_OPTIONS).index(current_rec) if current_rec in RECOMMENDATION_OPTIONS else None
@@ -1091,12 +1098,14 @@ def _render_dashboard() -> None:
     if os.environ.get('PORTAL_MODE') != '1':
         render_data_sync_card(key_prefix='dashboard')
 
-    section_header(
-        "Gestión de informes",
-        None if os.environ.get('PORTAL_MODE') == '1' else "Edita, oculta o elimina informes.",
-        icon="edit",
-    )
-    _render_visible_reports_management(visible_reports)
+    from scouting.portal.readonly_pilot import scouting_readonly as readonly_preview
+    if not readonly_preview():
+        section_header(
+            "Gestión de informes",
+            None if os.environ.get('PORTAL_MODE') == '1' else "Edita, oculta o elimina informes.",
+            icon="edit",
+        )
+        _render_visible_reports_management(visible_reports)
 
     _sync_dashboard_position_from_query_params()
     selected_by_group: dict[str, str | None] = {}
@@ -1152,6 +1161,8 @@ def _apply_pending_manual_report_reset() -> None:
 
 
 def _render_new_report() -> None:
+    from scouting.portal.readonly_pilot import require_scouting_writable
+    require_scouting_writable()
     # Reset diferido: limpiar claves de widgets ANTES de crearlos.
     _apply_pending_manual_report_reset()
     _manual_report_init_defaults()

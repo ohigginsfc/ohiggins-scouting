@@ -20,7 +20,14 @@ def get_connection() -> Connection:
         if not os.environ.get('SCOUTING_DATABASE_URL') or os.environ.get('DB_SCHEMA') != 'scouting':
             raise RuntimeError('Configura la conexión exclusiva al esquema scouting.')
     params = get_db_connection_params()
+    from scouting.portal import readonly_pilot
+    if readonly_pilot.enabled():
+        from scouting.portal.local_pilot import validate_environment
+        validate_environment()
+        params['options'] = readonly_pilot.connection_options('scouting')
     conn = psycopg.connect(**params)
+    if readonly_pilot.enabled():
+        conn.read_only = not readonly_pilot.scouting_writes()
     schema = os.environ.get("DB_SCHEMA", "").strip()
     if schema:
         try:

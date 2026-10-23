@@ -511,6 +511,8 @@ def _tab_quality(ctx: Context) -> None:
 
 @admin_only
 def page_tracking() -> None:
+    from scouting.portal.readonly_pilot import require_writable
+    require_writable()
     inject_styles()
     title('Seguimiento y configuración', 'Reglas, alertas con color, marcas, períodos de selección y resumen semanal.')
     ctx = context()

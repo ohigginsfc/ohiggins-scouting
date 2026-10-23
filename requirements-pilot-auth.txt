@@ -1,0 +1,3 @@
+# Optional file-credential providers: local pilot or explicit recovery image build.
+argon2-cffi==25.1.0
+itsdangerous==2.2.0

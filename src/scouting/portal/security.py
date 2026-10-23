@@ -42,6 +42,9 @@ def admin_only(fn):
 
 
 def can_edit(report):
+    from .readonly_pilot import scouting_readonly
+    if scouting_readonly():
+        return False
     user = require_user()
     return user['role'] == 'admin' or (user['role'] == 'scout' and (
         report.get('is_hidden') or
@@ -50,6 +53,8 @@ def can_edit(report):
 
 def require_report_management(conn, report_id):
     """Admin manages all reports; scout may manage any currently hidden report."""
+    from .readonly_pilot import require_scouting_writable
+    require_scouting_writable()
     user = require_user()
     if user['role'] == 'admin':
         return

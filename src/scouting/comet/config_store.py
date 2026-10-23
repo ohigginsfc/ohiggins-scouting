@@ -19,6 +19,7 @@ from psycopg.types.json import Jsonb
 
 from scouting.portal import accounts
 from scouting.portal.security import require_admin
+from scouting.portal.readonly_pilot import writable_only
 
 from .alerts import ALERT_COLORS, ALERTS_BY_KEY
 from .rules import RULES_BY_KEY, parse
@@ -121,6 +122,7 @@ def _read_all() -> tuple[dict, pd.DataFrame, pd.DataFrame]:
             pd.DataFrame(marks, columns=['personid', 'mark', 'active', 'note', 'updated_at']), frame)
 
 
+@writable_only
 def save_setting(key: str, value: Any, *, confirmed: bool = False) -> None:
     """Guarda una regla o la configuración de alertas. `confirmed` = aprobado por el club."""
     actor = require_admin()
@@ -155,6 +157,7 @@ def delivery_status_for_job(week_start: date, recipient: str):
     return (row['status'], row['attempts']) if row else None
 
 
+@writable_only
 def reserve_delivery_for_job(week_start: date, recipient: str, max_attempts: int = DELIVERY_MAX_ATTEMPTS) -> bool:
     """Reserva atómica: True solo si ESTA ejecución debe enviar.
 
@@ -171,6 +174,7 @@ def reserve_delivery_for_job(week_start: date, recipient: str, max_attempts: int
     return row is not None
 
 
+@writable_only
 def finish_delivery_for_job(week_start: date, recipient: str, *, sent: bool, error: str = '') -> None:
     """Cierra una reserva: `enviado` o `fallido` (con el motivo, sin datos sensibles)."""
     with _db() as db:
@@ -180,6 +184,7 @@ def finish_delivery_for_job(week_start: date, recipient: str, *, sent: bool, err
             ('enviado' if sent else 'fallido', (error or '')[:200], bool(sent), week_start, clean_recipient(recipient)))
 
 
+@writable_only
 def set_mark(personid, mark: str, active: bool, note: str = '') -> None:
     """Marca o desmarca a un jugador como proyectado o de selección (no borra: desactiva)."""
     actor = require_admin()
@@ -191,6 +196,7 @@ def set_mark(personid, mark: str, active: bool, note: str = '') -> None:
             'updated_by = EXCLUDED.updated_by, updated_at = now()', values)
 
 
+@writable_only
 def add_period(personid, kind: str, starts_on: date, ends_on: date, note: str = '') -> None:
     actor = require_admin()
     values = clean_period(personid, kind, starts_on, ends_on, note) + (actor['id'],)
@@ -200,6 +206,7 @@ def add_period(personid, kind: str, starts_on: date, ends_on: date, note: str = 
             'VALUES (%s, %s, %s, %s, %s, %s)', values)
 
 
+@writable_only
 def retire_period(period_id: int) -> None:
     """Retira un período (queda inactivo, con quién y cuándo lo retiró; no se borra)."""
     actor = require_admin()

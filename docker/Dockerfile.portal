@@ -1,14 +1,19 @@
 FROM python:3.11-slim-bookworm
+ARG INSTALL_ARGON2=0
 WORKDIR /app
 ENV PYTHONPATH=/app/src PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt /app/requirements.txt
+COPY requirements-pilot-auth.txt /app/requirements-pilot-auth.txt
 RUN pip install --no-cache-dir -r requirements.txt
+RUN if [ "$INSTALL_ARGON2" = "1" ]; then pip install --no-cache-dir -r requirements-pilot-auth.txt; fi
 COPY src /app/src
 COPY app /app/app
 COPY docker/portal-config.toml /app/.streamlit/config.toml
 COPY scripts/bootstrap_portal_admin.py /app/scripts/bootstrap_portal_admin.py
 COPY scripts/send_comet_weekly_digest.py /app/scripts/send_comet_weekly_digest.py
 COPY scripts/check_portal_config.py /app/scripts/check_portal_config.py
+COPY scripts/create_portal_recovery_credentials.py /app/scripts/create_portal_recovery_credentials.py
+COPY scripts/check_portal_recovery.py /app/scripts/check_portal_recovery.py
 COPY data/images /app/data/images
 CMD ["streamlit", "run", "app/portal.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
