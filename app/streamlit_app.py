@@ -38,9 +38,11 @@ from scouting.services.reports_service import (
     create_scouting_report_from_dict,
     delete_report_permanently,
     fetch_hidden_reports,
+    fetch_hidden_reports_by_position,
     fetch_visible_reports,
     hide_report,
     restore_report,
+    update_report_position_and_rating,
     update_report_recommendation,
     update_report,
 )
@@ -67,10 +69,12 @@ from ui.presentation import (
     format_date_for_ui,
     format_datetime_for_ui,
     format_number_for_ui,
+    format_rating_for_ui,
     player_report_option_label,
     render_data_source_notice,
     render_report_metadata,
     report_option_label,
+    report_position_for_ui,
 )
 from ui.manual_report_state import (
     apply_pending_manual_report_reset as apply_pending_manual_report_reset_pure,
@@ -83,7 +87,7 @@ from ui.navigation import (
     build_nav_pages,
     navigate_to,
 )
-from ui.pitch_map import render_interactive_pitch, selection_state_key
+from ui.pitch_map import PITCH_COORDS, render_interactive_pitch, selection_state_key
 from ui.styles import build_full_width_layout_css
 from ui.percentile_markers import (
     comparison_legend_html,
@@ -206,6 +210,7 @@ UI_SELECTION_KEYS: tuple[str, ...] = (
     "dashboard_selected_position",
     "dashboard_chile_selected_position",
     "dashboard_foreign_selected_position",
+    "hidden_selected_position",
     "selected_player_id",
     "selected_player",
     "player_lookup_selectbox",
@@ -664,6 +669,69 @@ def _dashboard_flash_pop() -> None:
                 st.session_state.pop(key, None)
 
 
+NO_PLAYER_POSITION_CHOICE = "Dejar sin posición"
+
+
+def _render_report_quick_update(report: dict[str, Any], report_id: int, *, key_prefix: str = "dashboard") -> None:
+    """«Actualizar informe»: corrige en el momento la posición y la valoración general (petición del 30-10-2026).
+
+    La posición de la ficha del jugador solo se completa si hoy no tiene ninguna; la valoración puede quedar sin dato.
+    """
+    player_name = report.get("player_full_name") or "el jugador"
+    with st.expander("Actualizar informe: posición y valoración", expanded=False):
+        current_rating = report.get("rating")
+        st.caption(
+            f"Hoy: posición {report_position_for_ui(report)} · valoración general {format_rating_for_ui(current_rating)}."
+        )
+        position_observed = st.text_input(
+            "Posición observada en el partido",
+            value=report.get("position_observed") or "",
+            key=f"{key_prefix}_pos_obs_{report_id}",
+        )
+        fill_player_position: str | None = None
+        if not str(report.get("player_position") or "").strip():
+            choice = st.selectbox(
+                "Posición en la ficha del jugador (hoy no tiene)",
+                [NO_PLAYER_POSITION_CHOICE, *get_available_positions()],
+                key=f"{key_prefix}_player_pos_{report_id}",
+                help="La ficha del jugador es la que usan el campograma y las tablas del dashboard.",
+            )
+            if choice != NO_PLAYER_POSITION_CHOICE:
+                fill_player_position = choice
+        has_rating = st.checkbox(
+            "Este informe tiene valoración general",
+            value=current_rating is not None,
+            key=f"{key_prefix}_has_rating_{report_id}",
+        )
+        new_rating: float | None = None
+        if has_rating:
+            start = float(current_rating) if current_rating is not None else 5.0
+            if not 0.0 <= start <= 10.0:
+                st.caption(f"La valoración guardada ({start:g}) está fuera de la escala 0–10: si actualizas, se ajusta.")
+            new_rating = st.slider(
+                "Valoración general (0–10)",
+                min_value=0.0,
+                max_value=10.0,
+                value=min(max(start, 0.0), 10.0),
+                step=0.5,
+                key=f"{key_prefix}_rating_{report_id}",
+            )
+        if st.button(labeled("refresh", "Actualizar informe"), type="primary", key=f"{key_prefix}_update_report_{report_id}"):
+            try:
+                with get_connection() as conn:
+                    update_report_position_and_rating(
+                        conn,
+                        report_id,
+                        position_observed=position_observed,
+                        rating=new_rating,
+                        player_position=fill_player_position,
+                    )
+                st.session_state["dashboard_flash_success"] = f"Informe de {player_name} actualizado."
+                st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"No se pudo actualizar: {exc}")
+
+
 def _render_visible_reports_management(reports: list[dict[str, Any]]) -> None:
     """Editar recomendación / ocultar / eliminar sobre informes visibles del dashboard."""
     from scouting.portal.readonly_pilot import scouting_readonly
@@ -723,6 +791,7 @@ def _render_visible_reports_management(reports: list[dict[str, Any]]) -> None:
         with st.expander('Editar evaluación'):
             for field, label in [('summary', 'Resumen'), ('strengths', 'Fortalezas'), ('weaknesses', 'Aspectos a mejorar')]:
                 edited_text[field] = st.text_area(label, value=report.get(field) or '', key=f'portal_edit_{report_id}_{field}')
+    _render_report_quick_update(report, report_id)
     portal_scout = False
     if os.environ.get('PORTAL_MODE') == '1':
         from scouting.portal.security import require_user
@@ -810,21 +879,41 @@ def _render_hidden_reports_page() -> None:
     st.caption('Consulta de informes ocultos.' if readonly_preview()
                else 'Edita, restaura o elimina informes ocultos.')
 
+    # La selección del campograma ya está en session_state al empezar el rerun (la fija el callback del gráfico).
+    selected_position = st.session_state.get(selection_state_key(HIDDEN_PITCH_PREFIX))
     with get_connection() as conn:
-        hidden = fetch_hidden_reports(conn, limit=200)
+        position_counts = dashboard_service.get_hidden_position_counts(conn)
+        if not position_counts and selected_position:
+            # Ya no queda ningún informe oculto (p. ej. se restauró el último): sin campograma no hay «Limpiar filtro».
+            st.session_state.pop(selection_state_key(HIDDEN_PITCH_PREFIX), None)
+            selected_position = None
+        hidden = (
+            fetch_hidden_reports_by_position(conn, selected_position, limit=HIDDEN_BY_POSITION_LIMIT)
+            if selected_position
+            else fetch_hidden_reports(conn, limit=200)
+        )
+
+    if position_counts:
+        _render_hidden_reports_pitch(position_counts)
 
     if not hidden:
-        empty_state(
-            "No hay informes ocultos.",
-            "Cuando ocultes un informe desde el Dashboard, aparecerá aquí.",
-            icon="hidden",
-        )
+        if selected_position:
+            st.info(
+                f"No hay informes ocultos de la posición {selected_position}. "
+                "Usa «Limpiar filtro» para ver todos."
+            )
+        else:
+            empty_state(
+                "No hay informes ocultos.",
+                "Cuando ocultes un informe desde el Dashboard, aparecerá aquí.",
+                icon="hidden",
+            )
         return
 
     rows = [
         {
             "Jugador": r.get("player_full_name"),
-            "Posición": r.get("player_position"),
+            "Posición": report_position_for_ui(r),
             "Scout": r.get("scout_name"),
             "Fecha": format_date_for_ui(r.get("report_date"), long=False),
             "Recomendación": r.get("recommendation"),
@@ -858,10 +947,11 @@ def _render_hidden_reports_page() -> None:
     )
 
     st.write({
-        'Valoración': report.get('rating'),
+        'Valoración': format_rating_for_ui(report.get('rating')),
         'Recomendación': report.get('recommendation'),
         'Partido observado': report.get('match_observed'),
-        'Posición observada': report.get('position_observed'),
+        'Posición (ficha del jugador)': report.get('player_position') or '—',
+        'Posición observada': report.get('position_observed') or '—',
         'Minutos observados': report.get('minutes_observed'),
     })
     for field, label in [('summary', 'Resumen'), ('strengths', 'Fortalezas'), ('weaknesses', 'Aspectos a mejorar')]:
@@ -879,6 +969,7 @@ def _render_hidden_reports_page() -> None:
 
     if readonly_preview():
         return
+    _render_report_quick_update(report, report_id, key_prefix='hidden')
     with st.form(f'hidden_edit_report_{report_id}'):
         current_rec = report.get('recommendation')
         rec_index = list(RECOMMENDATION_OPTIONS).index(current_rec) if current_rec in RECOMMENDATION_OPTIONS else None
@@ -945,6 +1036,11 @@ def _style_recommendation_dataframe(rows: list[dict[str, Any]]) -> Any:
     if not rows:
         return rows
     df = pd.DataFrame(rows)
+    if "Valoración" in df.columns:
+        # Como texto: sin los seis decimales del tipo numeric (6.5, no 6.500000) y con «—» donde no hay valoración;
+        # en una columna numérica la celda vacía se vería como «None».
+        df["Valoración"] = df["Valoración"].map(format_rating_for_ui)
+    df = df.fillna("—")  # una celda sin dato se ve «—», no «None»
 
     def _rec_style(val: Any) -> str:
         styles = recommendation_tone(str(val) if val is not None else None)
@@ -952,10 +1048,7 @@ def _style_recommendation_dataframe(rows: list[dict[str, Any]]) -> Any:
 
     if "Recomendación" not in df.columns:
         return df
-    styled = df.style.map(_rec_style, subset=["Recomendación"])
-    if "Valoración" in df.columns:  # sin los seis decimales del tipo numeric (6.5, no 6.500000)
-        styled = styled.format({"Valoración": lambda v: "—" if pd.isna(v) else f"{float(v):g}"})
-    return styled
+    return df.style.map(_rec_style, subset=["Recomendación"])
 
 
 HIDDEN_PREVIEW_LIMIT = 5
@@ -973,7 +1066,7 @@ def _hidden_preview_rows(hidden: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
             "Jugador": r.get("player_full_name"),
-            "Posición": r.get("player_position") or "—",
+            "Posición": report_position_for_ui(r),
             "Scout": r.get("scout_name") or "—",
             "Fecha del informe": format_date_for_ui(r.get("report_date"), long=False),
             "Valoración": round(float(r["rating"]), 2) if r.get("rating") is not None else None,
@@ -986,8 +1079,93 @@ def _hidden_preview_rows(hidden: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def _render_hidden_reports_preview(hidden: list[dict[str, Any]], *, total: int) -> None:
-    """Vista preliminar de los últimos informes ocultos (Pablo, 13-10-2026): se ven sin entrar a la página de gestión."""
+HIDDEN_PITCH_PREFIX = "hidden"
+HIDDEN_PITCH_TITLE = "Mapa de posiciones · informes ocultos"
+HIDDEN_BY_POSITION_LIMIT = 200
+NO_POSITION_LABEL = "Sin posición en la ficha"
+
+
+def _hidden_position_summary_rows(groups: dict[str, Any]) -> list[dict[str, Any]]:
+    """Filas de la tabla que acompaña al campograma de informes ocultos: también lo que no cabe en el campo."""
+    placed = sorted(
+        [*groups["on_map"], *groups["off_map"]],
+        key=lambda r: (-int(r.get("reports_count") or 0), str(r["position"])),
+    )
+    off_map = {str(r["position"]) for r in groups["off_map"]}
+    rows = [
+        {
+            "Posición": f"{r['position']} (no está en el campograma)" if str(r["position"]) in off_map else str(r["position"]),
+            "Jugadores": int(r.get("players_count") or 0),
+            "Informes ocultos": int(r.get("reports_count") or 0),
+        }
+        for r in placed
+    ]
+    if groups["no_position"]:
+        rows.append(
+            {
+                "Posición": NO_POSITION_LABEL,
+                "Jugadores": groups["no_position"]["players_count"],
+                "Informes ocultos": groups["no_position"]["reports_count"],
+            }
+        )
+    return rows
+
+
+def _render_hidden_reports_pitch(position_counts: list[dict[str, Any]]) -> str | None:
+    """Campograma con los informes ocultos por posición (petición del 30-10-2026); devuelve la posición elegida.
+
+    Cuenta según la posición de la ficha del jugador, igual que los campogramas del dashboard cuentan los visibles.
+    Lo que no se puede ubicar en el campo (jugador sin posición, o con una posición que el campograma no reconoce)
+    se muestra aparte en la tabla, para que no desaparezca de la cuenta.
+    """
+    groups = dashboard_service.split_hidden_position_counts(position_counts, PITCH_COORDS)
+    pitch_col, detail_col = st.columns(2, gap="large")
+    with pitch_col:
+        selected = _render_pitch_position_map(
+            _position_counts_lookup(groups["on_map"]),
+            st.session_state.get(selection_state_key(HIDDEN_PITCH_PREFIX)),
+            title=HIDDEN_PITCH_TITLE,
+            key_prefix=HIDDEN_PITCH_PREFIX,
+        )
+    with detail_col:
+        st.markdown("**Informes ocultos por posición**")
+        st.dataframe(_hidden_position_summary_rows(groups), use_container_width=True, hide_index=True)
+    no_position = groups["no_position"]
+    if no_position:
+        st.caption(
+            f"{no_position['players_count']} jugador(es) con {no_position['reports_count']} informe(s) oculto(s) no tienen "
+            "posición en su ficha: no se pueden ubicar en el campograma, pero están contados en la tabla. "
+            "La posición se completa con «Actualizar informe»."
+        )
+    if groups["off_map"]:
+        names = ", ".join(sorted(str(r["position"]) for r in groups["off_map"]))
+        st.caption(
+            f"Hay informes ocultos con una posición que el campograma no reconoce ({names}): "
+            "están contados en la tabla, no en el campo."
+        )
+    return selected
+
+
+def _render_hidden_position_reports(position: str, *, total: int) -> None:
+    """Informes ocultos de la posición elegida en el campograma (vista del dashboard)."""
+    st.markdown(f"### Informes ocultos — {position}")
+    if total <= 0:
+        st.caption("No hay informes ocultos de esta posición.")
+        return
+    with get_connection() as conn:
+        reports = fetch_hidden_reports_by_position(conn, position, limit=HIDDEN_BY_POSITION_LIMIT)
+    st.dataframe(_style_recommendation_dataframe(_hidden_preview_rows(reports)), use_container_width=True, hide_index=True)
+    if total > len(reports):
+        st.caption(f"Se muestran los {len(reports)} más recientes de {total} informes ocultos de esta posición.")
+
+
+def _render_hidden_reports_preview(
+    hidden: list[dict[str, Any]], *, total: int, position_counts: list[dict[str, Any]] | None = None
+) -> None:
+    """Vista preliminar de los últimos informes ocultos (Pablo, 13-10-2026): se ven sin entrar a la página de gestión.
+
+    Con `position_counts`, debajo se muestra el campograma de los informes ocultos por posición (30-10-2026).
+    """
     section_header("Informes ocultos", "Vista preliminar de los más recientes.", icon="hidden")
     if not hidden:
         empty_state(
@@ -1010,6 +1188,11 @@ def _render_hidden_reports_preview(hidden: list[dict[str, Any]], *, total: int) 
         on_click=navigate_to,
         args=("Informes ocultos",),
     )
+    if position_counts:
+        selected = _render_hidden_reports_pitch(position_counts)
+        if selected:
+            by_position = {str(r["position"]): int(r.get("reports_count") or 0) for r in position_counts if r.get("position")}
+            _render_hidden_position_reports(selected, total=by_position.get(selected, 0))
 
 
 def _render_dashboard() -> None:
@@ -1020,6 +1203,7 @@ def _render_dashboard() -> None:
         counts_by_origin = dashboard_service.get_position_counts_by_origin(conn)
         visible_reports = fetch_visible_reports(conn, limit=50)
         hidden_preview = fetch_hidden_reports(conn, limit=HIDDEN_PREVIEW_LIMIT)
+        hidden_position_counts = dashboard_service.get_hidden_position_counts(conn) if hidden_preview else []
 
     k1, k2, k3, k4, k5 = st.columns(5)
     with k1:
@@ -1069,6 +1253,12 @@ def _render_dashboard() -> None:
         "Últimos informes registrados.",
         icon="activity",
     )
+    st.button(
+        labeled("refresh", "Actualizar"),
+        key="dashboard_refresh_recent",
+        type="secondary",
+        help="Vuelve a leer los informes de la base de datos ahora mismo.",
+    )
     recent = snap["recent_reports"]
     if not recent:
         empty_state(
@@ -1081,7 +1271,7 @@ def _render_dashboard() -> None:
             {
                 "Fecha": format_date_for_ui(r.get("report_date"), long=False),
                 "Jugador": r.get("player_full_name"),
-                "Posición": r.get("player_position"),
+                "Posición": report_position_for_ui(r),
                 "Scout": r.get("scout_name"),
                 "Competición": r.get("competition"),
                 "Valoración": r.get("rating"),
@@ -1090,8 +1280,15 @@ def _render_dashboard() -> None:
             for r in recent
         ]
         st.dataframe(_style_recommendation_dataframe(rows), use_container_width=True, hide_index=True)
+        st.caption(
+            "Posición: la de la ficha del jugador o, si no tiene, la que el scout observó en el informe. "
+            "«—» significa que no hay dato (la valoración general es opcional y no se rellena sola). "
+            "Para corregir un informe, usa «Actualizar informe» en Gestión de informes."
+        )
 
-    _render_hidden_reports_preview(hidden_preview, total=int(snap.get("hidden_report_count", 0)))
+    _render_hidden_reports_preview(
+        hidden_preview, total=int(snap.get("hidden_report_count", 0)), position_counts=hidden_position_counts
+    )
 
     from ui.data_sync_card import render_data_sync_card
 
@@ -1272,7 +1469,14 @@ def _render_new_report() -> None:
             "Rating, fortalezas, debilidades y recomendación.",
             icon="edit",
         )
-        rating = st.slider("Rating general (0–10)", min_value=0.0, max_value=10.0, step=0.5, key="mr_rating_scout")
+        st.checkbox(
+            "Registrar una valoración general",
+            key="mr_rate_report",
+            help="Si no la marcas, el informe queda sin valoración general («—»): no se guarda ningún valor por defecto.",
+        )
+        rating = None
+        if st.session_state.get("mr_rate_report"):
+            rating = st.slider("Rating general (0–10)", min_value=0.0, max_value=10.0, step=0.5, key="mr_rating_scout")
         strengths = st.text_area("Fortalezas", height=100, key="mr_strengths")
         weaknesses = st.text_area("Debilidades", height=100, key="mr_weaknesses")
         summary = st.text_area("Resumen", height=100, key="mr_summary")
@@ -4520,6 +4724,34 @@ def _render_player_subjective_comparison_block(
     return detail_rows
 
 
+def _player_team_history_rows(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "Temporada": metric_labels.format_season_label(h.get("season")),
+            "Competición": h.get("competition") or "—",
+            "Equipo": h.get("team_name") or "—",
+        }
+        for h in history
+    ]
+
+
+def _render_player_team_history(player_id: int) -> None:
+    """Equipos del jugador en cada temporada, según sus datos objetivos (petición del 30-10-2026)."""
+    with get_connection() as conn:
+        history = players_service.get_player_team_history(conn, player_id)
+    st.markdown("##### Historial de equipos")
+    if not history:
+        st.caption(
+            "Sin historial de equipos: este jugador no tiene datos objetivos (Sofascore) con el equipo de cada "
+            "temporada. El equipo de la ficha de scouting es el que se anotó al registrar al jugador."
+        )
+        return
+    st.dataframe(_player_team_history_rows(history), use_container_width=True, hide_index=True)
+    st.caption(
+        "Según los datos objetivos (Sofascore) de cada temporada y competición, de la más reciente a la más antigua."
+    )
+
+
 def _render_player_lookup() -> None:
     st.caption("Informe de scouting · valoración cualitativa y análisis estadístico.")
 
@@ -4542,10 +4774,10 @@ def _render_player_lookup() -> None:
         )
         return
 
-    labels = [
-        f"{p['full_name']} ({p.get('current_team') or '—'})"
-        for p in players
-    ]
+    # Por prudencia: si dos etiquetas coincidieran, la segunda taparía a la primera en el diccionario y no se podría elegir.
+    labels = ensure_unique_labels(
+        [f"{p['full_name']} ({players_service.lookup_team_label(p)})" for p in players]
+    )
     label_to_id = {lab: int(p["id"]) for lab, p in zip(labels, players, strict=True)}
     select_options = [PLAYER_LOOKUP_NONE_LABEL, *labels]
 
@@ -4556,6 +4788,11 @@ def _render_player_lookup() -> None:
             options=select_options,
             key="player_lookup_selectbox",
         )
+        if any(p.get("previous_team") for p in players):
+            st.caption(
+                "Si la ficha de scouting no tiene equipo, se muestra el último que figura en los datos objetivos, "
+                "con su temporada (por ejemplo «Temuco · 2025»)."
+            )
     with clr_col:
         st.write("")
         if st.button(labeled("clear", "Limpiar"), key="player_lookup_clear", type="secondary"):
@@ -4610,6 +4847,8 @@ def _render_player_lookup() -> None:
 
     with st.container(border=False):
         _render_player_executive_ficha(player, selected_rep)
+
+    _render_player_team_history(player_id)
 
     if selected_rep:
         _render_player_subjective_report_content(selected_rep, selected_attrs, player)

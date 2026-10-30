@@ -123,11 +123,15 @@ def test_readonly_hidden_report_ui_has_no_write_controls(cloud_config, monkeypat
     monkeypatch.setattr(scouting, 'fetch_hidden_reports', lambda *a, **k: [
         dict(id=1, player_full_name='Synthetic player', is_hidden=True, summary='Synthetic report')])
     monkeypatch.setattr(scouting.attribute_ratings_service, 'get_report_attribute_ratings', lambda *a: [])
+    monkeypatch.setattr(scouting.dashboard_service, 'get_hidden_position_counts',
+                        lambda conn: [dict(position='Delantero', players_count=1, reports_count=1)])
     monkeypatch.setattr(security, 'require_user', lambda: SCOUT)
     monkeypatch.setenv('PORTAL_MODE', '1')
     app = AppTest.from_string('from streamlit_app import _render_hidden_reports_page\n_render_hidden_reports_page()').run()
     assert not app.exception and not app.error
-    assert len(app.button) == 0 and len(app.text_area) == 0 and len(app.dataframe) == 1
+    # Solo lectura: el campograma de informes ocultos se puede mirar (tabla por posición y tabla de informes), pero no hay
+    # ningún botón (ni «Actualizar informe», ni guardar, ni restaurar) ni cuadros de texto para editar.
+    assert len(app.button) == 0 and len(app.text_area) == 0 and len(app.dataframe) == 2
 
 
 def test_readonly_router_omits_creation_and_comet_configuration(cloud_config, monkeypatch):

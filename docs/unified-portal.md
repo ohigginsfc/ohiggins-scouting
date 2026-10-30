@@ -155,6 +155,87 @@ La suma de los tres grupos es el conteo por posición de antes (una prueba contr
 botón para ir a *Informes ocultos*, donde se editan, restauran o eliminan. Es solo lectura. *(Se interpretó «vista preliminar» como una
 vista previa en el Dashboard; la página de gestión ya mostraba el detalle completo de cada informe.)*
 
+## Mejoras de Scouting del 30-10-2026
+
+Pedidas por el club tras revisar el Dashboard y «Consultar jugador». Valen para Admin y Scout, con los permisos de siempre. **No hay
+migraciones ni cambios de esquema**: solo código de la aplicación.
+
+### Posición y valoración en «Actividad reciente»
+
+| Lo que se veía | Qué lo causaba (según el código) | Qué cambia |
+|---|---|---|
+| Posición «None» | La tabla mostraba la posición de la **ficha del jugador**; si la ficha no la tiene (jugadores creados por importación, o sin posición), salía el vacío de la base de datos escrito como «None» | Se muestra la posición de la ficha; si no hay, la **posición observada** que el scout anotó en ese informe; si tampoco, «—». Nunca «None» y nunca se inventa una posición |
+| Todas las valoraciones en 6 | El control «Rating general» del alta manual **arrancaba en 6** y su valor se guardaba siempre, aunque el scout no lo tocara | La valoración general ahora es **opcional**: hay que marcar «Registrar una valoración general» para enviarla. Sin marcar, el informe queda sin valoración («—») y no se guarda ningún valor de relleno |
+
+En las tablas de informes (Actividad reciente, vista previa de ocultos y lista de ocultos) **cualquier celda sin dato se ve «—»**, no «None»
+(también valoración, scout, competición y recomendación), y la valoración sale sin decimales de sobra (6.5, no 6.500000).
+
+**Lo que no se hizo a propósito:** no se tocan los informes ya guardados. Un 6 elegido de verdad y un 6 puesto por el valor inicial del control
+son idénticos en la base de datos, así que no hay forma segura de distinguirlos; borrar o cambiar valoraciones en bloque sería inventar datos.
+Quien tenga acceso de lectura a Supabase puede ver cuántos hay antes de decidir nada (consultas de solo lectura; en Supabase el esquema es `scouting`):
+
+```sql
+-- Distribución de valoraciones de los informes visibles
+SELECT rating, count(*) FROM scouting.scouting_reports WHERE NOT COALESCE(is_hidden, false) GROUP BY rating ORDER BY count(*) DESC;
+-- Valoraciones y 6 exactos por origen del informe (manual, importado…)
+SELECT source_type, source_name, count(*) AS informes, count(*) FILTER (WHERE rating = 6) AS con_6
+FROM scouting.scouting_reports GROUP BY 1, 2 ORDER BY informes DESC;
+-- Informes cuyo jugador no tiene posición en la ficha
+SELECT count(*) FILTER (WHERE p.position IS NULL OR trim(p.position) = '') AS sin_posicion_en_ficha, count(*) AS informes
+FROM scouting.scouting_reports sr JOIN scouting.players p ON p.id = sr.player_id WHERE NOT COALESCE(sr.is_hidden, false);
+```
+
+Si el equipo confirma que los 6 eran el valor inicial, cada informe se corrige con «Actualizar informe» (abajo). Cualquier corrección masiva
+debe decidirla y ejecutarla quien administra la base de datos; este cambio no la hace.
+
+### Botones para actualizar
+
+*La petición decía «un botón para actualizar el informe haciendo clic en el momento». Puede significar dos cosas y se cubrieron las dos:*
+
+* **«Actualizar»** (sobre la tabla de «Actividad reciente»): vuelve a leer los informes de la base de datos al instante.
+* **«Actualizar informe»** (en «Gestión de informes» y en la página «Informes ocultos»): corrige en el momento la **posición observada**, la
+  **valoración general** (de 0 a 10, o «sin valoración») y, **solo si la ficha del jugador no tiene posición**, esa posición (la usan el
+  campograma y las tablas por posición). Nunca pisa una posición que ya existe. Valida todo antes de guardar: o se guarda todo o nada.
+  Permisos: los mismos que editar un informe (el Scout, sus informes visibles y cualquier oculto; el Admin, todos). En el piloto de solo lectura no aparece.
+
+### Campograma de los informes ocultos
+
+Debajo de la vista preliminar de ocultos del Dashboard (solo si hay informes ocultos) y encima de la lista en la página **Informes ocultos**
+hay un campograma como los demás, con los **informes ocultos por posición**, y al lado una tabla con jugadores e informes por posición.
+
+* Cuenta según la **posición de la ficha del jugador**, igual que los otros dos campogramas. *(Interpretación: «ocultos por posición» se
+  tomó así por coherencia; ver las preguntas abajo.)*
+* En el Dashboard, hacer clic en una posición muestra debajo los informes ocultos de esa posición. En la página «Informes ocultos» filtra la
+  lista y el selector de informe; «Limpiar filtro» vuelve a mostrar todos.
+* Lo que **no se puede ubicar** en el campo no desaparece: los jugadores sin posición en la ficha y los que tienen una posición que el campograma
+  no reconoce aparecen igualmente en la tabla (y en una nota con su número). La suma de la tabla es el total de informes ocultos.
+* Es de solo lectura: se puede mirar en el piloto de solo lectura y no añade ningún botón de edición.
+
+### «Consultar jugador»: equipos del jugador
+
+* **Lista de jugadores:** si la ficha de scouting no tiene equipo (antes salía «(—)»), se muestra el **último equipo que figura en sus datos
+  objetivos**, con su temporada: `Nombre (Temuco · 2025)`. El año evita confundirlo con el equipo actual. Si la ficha tiene equipo, manda la ficha.
+* **Ficha del jugador:** nueva tabla **Historial de equipos** (temporada, competición, equipo), de la más reciente a la más antigua.
+* Fuente: `objective_metrics.raw_payload` de datos **reales de Sofascore**; los datos demo se excluyen (un equipo de prueba no es un equipo anterior).
+  Un bloque temporada + competición sin equipo en el dato no aparece. Si en una misma temporada hay dos competiciones, se muestra primero la que tiene más métricas.
+* **Límite conocido:** solo hay historial para jugadores con datos objetivos. La ficha de scouting guarda **un único** equipo (el primero que se anotó;
+  los informes siguientes no lo cambian) y no conserva los anteriores, así que un jugador visto solo por scouts, sin Sofascore, no tiene «antiguos
+  equipos» que mostrar; el texto de la ficha lo dice en vez de inventarlos.
+
+### Preguntas para Pablo (nuevas)
+
+1. **Valoración 6:** ¿los scouts solían dejar el 6 que traía el control? Si sí, ¿quiere que esos informes pasen a «sin valoración» (lo haría quien administra la base de datos, no la aplicación)?
+2. **Campograma de ocultos:** ¿debe contar por la posición de la **ficha** del jugador (como ahora) o por la posición **observada en cada informe**?
+3. **Antiguos equipos de jugadores sin Sofascore:** ¿quieren que el scout anote el club en **cada** informe (o un historial de clubes en la ficha) para poder mostrarlos? Hoy no se guardan.
+4. **«Actualizar informe»:** ¿bastaba refrescar la lista, o querían editar posición y valoración como se hizo?
+
+### Lo que no se pudo comprobar
+
+* Con datos reales: cuántos informes tienen posición vacía o un 6 por defecto, y si «None» venía solo de fichas sin posición. Las causas salen de leer el código; las consultas de arriba permiten comprobarlo.
+* El aspecto con datos reales: se revisó en el navegador (campograma de ocultos con su filtro, «Actualizar informe», lista de jugadores con
+  equipo, Historial de equipos y las tablas de informes), pero **solo con datos ficticios**, sin base de datos. Esa revisión encontró que la
+  valoración vacía se veía «None» en las tablas y se corrigió. Las pruebas automáticas (AppTest) comprueban contenido y comportamiento.
+
 ## Procedencia de COMET
 
 `app/comet_dashboard.py` incorpora las cinco pantallas de dataProject/main,
