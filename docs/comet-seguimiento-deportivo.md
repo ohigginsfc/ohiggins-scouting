@@ -8,10 +8,10 @@ usan los topes por defecto de las secciones del club. Scout sigue sin acceso a C
 |---|---|
 | **Partido semanal** | Planilla completa de cada partido de la semana |
 | **Rankings por categoría** | Minutos, goles, tarjetas y partidos ganados con el jugador en cancha |
-| **Ficha del jugador** | Perfil, historial, categoría vs edad, evolución de minutos, marcas y períodos de selección |
+| **Ficha del jugador** | Perfil, historial, categoría vs edad, evolución de minutos, historial completo de partidos con las subidas de categoría, marcas y períodos de selección |
 | **Indicadores** | Participación, victorias, edad, antigüedad, minutos de jugadores más chicos, partidos por rol, disciplina y goles |
 | **Alertas** | Las cuatro alertas automáticas, con color |
-| **Jugadores adelantados** | Quienes juegan en categorías superiores a su edad |
+| **Jugadores adelantados** | Quienes juegan en categorías superiores a su edad, con el historial completo de cada uno |
 | **Seguimiento y configuración** | Reglas y pendientes, alertas y colores, marcas y períodos, resumen semanal, calidad de datos |
 
 Capturas de cada pantalla (datos ficticios) en [`comet-seguimiento/capturas`](comet-seguimiento/capturas).
@@ -31,6 +31,8 @@ Capturas de cada pantalla (datos ficticios) en [`comet-seguimiento/capturas`](co
 ## Cobertura de la solicitud
 
 Estado: ✅ implementado · 🟠 implementado con una regla provisional (pendiente de confirmar) · ⛔ no posible con los datos actuales de COMET.
+Las mejoras pedidas el 30-10-2026 (plantel vigente y bajas, ranking de 0 a todos, goles por año, historial completo de quien sube de categoría
+y las tres reglas decididas ese día) están en [Mejoras del 30-10-2026](#mejoras-del-30-10-2026).
 
 ### Partido semanal
 
@@ -104,18 +106,107 @@ Sin ella las pantallas funcionan con los valores por defecto y en solo lectura.
 | Campograma | Dos mapas de posiciones: jugadores chilenos y jugadores extranjeros | Scouting (ver su documentación) |
 | Informes ocultos | Vista preliminar | Scouting (ver su documentación) |
 
+## Mejoras del 30-10-2026
+
+Todas son del módulo COMET, solo para Admin. **No se tocó `dataProject`** y no se escribe nada en COMET: lo nuevo que hay que guardar (las bajas) vive en el esquema privado `portal`.
+
+### 1. Plantel vigente: por qué el Primer Equipo mostraba más de 600 jugadores
+
+**Causa.** La sincronización de COMET solo hace *upserts* y no elimina datos ([`comet-synchronization.md`](comet-synchronization.md)), y las pantallas contaban todos los jugadores
+que COMET mantiene como `ACTIVO` en O'Higgins, aunque ya no estén en el club (en la captura, unos 750 en Primer Equipo).
+Que los jugadores que se fueron sigan como `ACTIVO` se deduce de esa captura y de cómo funciona la sincronización: no se pudo comprobar contra la base real desde este entorno.
+
+**Regla automática** (`src/scouting/comet/roster.py`, regla `squad_activity_days`, 365 días por defecto). En este orden, un jugador:
+
+1. con una **baja registrada** por un administrador queda fuera;
+2. que **figuró en la planilla de un partido de O'Higgins** dentro de los últimos 365 días cuenta como vigente;
+3. cuya ficha trae un `datefrom` dentro de ese plazo (alta reciente que todavía no jugó) también cuenta;
+4. todo lo demás queda como **«Sin actividad reciente»**: no se afirma que se fue, solo que no cuenta en las cifras. Sigue visible y se puede reincorporar.
+
+No se usa ninguna fecha de salida o de fin de contrato: no está confirmado que COMET la entregue ni qué significaría. Un dato que falta nunca se completa: sin planilla ni `datefrom` reciente el jugador queda «sin actividad reciente».
+
+**Dónde se ve.**
+
+| Pantalla | Qué cambia |
+|---|---|
+| Resumen ejecutivo | «Jugadores por categoría» cuenta solo el plantel vigente y dice cuántos registros quedan fuera y por qué |
+| Estructura del plantel | Nueva *Revisión del plantel*: registrados / vigentes / sin actividad / con baja por categoría, comparación de plazos (90, 180, 365, 730 y 1095 días) para elegir el valor con los datos a la vista, lista de cada grupo y reincorporación |
+| Desarrollo juvenil | Panel *Bajas de U-N*: **eliminar a los jugadores de la sub-20 para abajo si causan baja** (motivo, fecha, nota y confirmación), y reincorporarlos |
+| Análisis de jugadores (campo y arqueros) y Desarrollo juvenil | La casilla *Incluir jugadores que ya no están en el club (histórico)* devuelve a los ex jugadores a las listas y rankings |
+
+**Bajas.** Una baja saca al jugador de las cifras y listas del plantel; **no borra nada** (su historial de partidos, goles y minutos se conserva, y siguen en Ficha del jugador)
+y se **revierte** con *Reincorporar*. Motivos: dejó el club, cedido, transferido, otro (ver la nota). Esa lista de motivos es **provisional**: no la fijó Pablo.
+Si un jugador con baja vuelve a figurar en una planilla posterior, el detalle lo avisa («atención: figura en una planilla posterior») para que un administrador decida.
+Las bajas se guardan en `portal.comet_player_bajas` (ver *Migración 005*); sin ella (o en modo solo lectura) la regla automática funciona igual y los controles de baja quedan deshabilitados con el motivo a la vista.
+
+### 2. Ranking por categoría: de 0 a todos
+
+El control *Mostrar* de Rankings por categoría ya no empieza en 10: va de **0** hasta **Todos** (la última posición muestra a todos los jugadores con datos de esa categoría y temporada). En 0 no se muestra ninguna fila.
+Con más de 20 jugadores arranca en 20; con 20 o menos, en *Todos*.
+
+### 3. Goles por año
+
+En **Desarrollo juvenil**, **Análisis de jugadores** (jugadores de campo y arqueros) y **Rendimiento competitivo** hay un filtro *Año* (por defecto *Todos los años*) que cambia las cifras de la pantalla.
+Donde aparecen los goleadores (Desarrollo juvenil y jugadores de campo de Análisis de jugadores) hay además una tabla *Goles por año* con una columna por año y el total.
+El año es el de la temporada (`yearly.py`: el primer año de cuatro cifras del nombre de la temporada y, si no lo tiene, el año del partido). Un año sin partidos se ve como «—»;
+un 0 solo aparece cuando el jugador jugó y no marcó, y unos goles desconocidos no se muestran como 0.
+
+### 4. Historial completo de quien sube de categoría
+
+Se puede ver **todo el historial de partidos** de un jugador que promociona, con cada subida marcada:
+
+* **Ficha del jugador → Partidos** (cualquier jugador) y **Jugadores adelantados → Historial completo** (se elige entre los adelantados de la temporada; se lee del primer partido al último).
+* Todas las temporadas y categorías, sin recortar: también los partidos en que solo fue citado. Cada fila trae fecha, temporada, categoría, la que le corresponde por edad, si jugó por encima de su edad,
+  la subida de categoría («Subió de U-14 a U-15»), rival, local/visita, marcador final, rol, minutos, goles, tarjetas y el resultado con el jugador en cancha.
+* Resumen: partidos del historial, jugados, subidas de categoría, partidos jugados por encima de su edad y esos minutos. Filtros: todos los partidos, solo los jugados por encima de su edad, solo los de una subida; y orden.
+* **Cómo se detecta una subida** (`adelantados.player_timeline`): el primer partido **jugado** en una categoría más alta que todas en las que ya había jugado. Hace falta un partido jugado anterior:
+  sin historial no se afirma una subida (COMET solo conoce los partidos registrados). Una citación sin jugar no cuenta como haber jugado, ni borra lo jugado antes; bajar un escalón y volver no es otra subida;
+  una categoría que no está en la escalera se muestra, pero no se cuenta como subida.
+
+Interpretación: la petición decía «ver todo su visionado de los partidos que ascendió»; se entendió como el historial completo con las subidas marcadas.
+
+### 5. Reglas decididas el 30-10-2026
+
+| Regla | Valor | Comentario |
+|---|---|---|
+| Fecha de corte de edad | 31 de diciembre del año de la temporada | Ya era el valor por defecto; ahora figura como decidida |
+| Minutos posibles | Se cuentan **desde la primera citación** del jugador | Cambia el valor por defecto (antes: toda la serie). Baja los minutos posibles de quien llegó a mitad de año y sube su participación |
+| Minutos mínimos para contar el resultado del partido | **0** (sin mínimo) | Antes: 1 minuto. Cuentan los partidos en que participó, aunque jugara poco o no se conozcan sus minutos |
+
+Si en Supabase ya hay un valor guardado para alguna de estas reglas, ese valor manda sobre el nuevo por defecto. La decisión se muestra en *Seguimiento y configuración → Reglas y pendientes* como «Decisión comunicada por el equipo del proyecto el 30-10-2026».
+La confirmación de Pablo sigue siendo un acto aparte de un administrador.
+
+### Preguntas nuevas para Pablo (en lenguaje sencillo)
+
+1. ¿Desde cuántos días sin aparecer en una planilla se considera que un jugador ya no está en el plantel? Hoy: 365 días.
+2. Un jugador del Primer Equipo con contrato vigente que todavía no ha jugado: ¿debe contarse igual? Hoy solo cuenta si tiene planilla reciente o un alta reciente.
+3. En la ficha de COMET, ¿qué significa `datefrom`: la fecha de ingreso al club o el inicio del contrato? ¿Existe una fecha de salida o de fin de contrato que se pueda usar para saber quién ya no está?
+4. ¿Quién autoriza una baja en las categorías menores y qué motivos hay que distinguir? La lista actual (dejó el club, cedido, transferido, otro) es provisional.
+5. ¿Las bajas del Primer Equipo se registran igual que las de las categorías menores? Hoy el panel de bajas está en Desarrollo juvenil; el Primer Equipo se limpia con la regla automática.
+6. ¿Un jugador de 14 años que está en U-15 es «adelantado»? Hoy sí: un escalón por encima de su categoría por edad.
+7. ¿Los amistosos y las copas entran en los minutos posibles?
+
+### Lo que no se pudo comprobar
+
+* El efecto de la regla de vigencia sobre los datos reales de COMET (cuántos jugadores quedan en cada categoría): solo se probó con datos ficticios y con una base PostgreSQL desechable. La tabla *¿Qué plazo conviene?* de Estructura del plantel lo muestra con los datos reales cuando un administrador abra la pantalla.
+* Los reportes por correo de `comet_reports` (script aparte, que no pasa por las pantallas) no aplican las bajas todavía.
+* La migración 005 no se aplicó en ninguna base real.
+
 ## Reglas y preguntas pendientes para Pablo
 
 Estas son las siete cosas que el documento pedía confirmar. Cada una tiene un criterio provisional ya aplicado,
 visible en pantalla, y se cambia o se confirma desde *Seguimiento y configuración → Reglas y pendientes*.
 Tras la reunión del 13-10-2026 quedan **confirmadas** la 3 y la parte del ciclo de la 6; la 1 está decidida pero falta el dato.
+El 30-10-2026 el equipo del proyecto comunicó tres decisiones más: la fecha de corte de la edad (4), que los minutos posibles se cuentan desde la primera
+citación (parte de la 2) y que no hay mínimo de minutos para contar el resultado del partido. Quedan registradas como «decisión comunicada por el equipo del proyecto»
+y **no** como una decisión de Pablo.
 
 | # | Pregunta en lenguaje sencillo | Criterio provisional |
 |---|---|---|
 | 1 | **Decidido (13-10-2026): resultado cuando entró y salió y si cambió.** Queda por confirmar cómo tratar gol y cambio en el mismo minuto. | Integración COMET con eventos reales; por defecto el gol del mismo minuto cuenta dentro. Si faltan goles/cambios se muestra sin dato; el resultado final queda separado |
-| 2 | ¿Qué partidos cuentan como «minutos posibles»? ¿Todos los de la serie o solo desde que el jugador llegó? ¿Entran amistosos y copas? ¿Sirve la duración reglamentaria (`matchlength`) o los minutos realmente jugados? ¿Qué estados de partido (`matchstatus`) no cuentan? | Todos los partidos ya jugados de la competición donde el jugador fue citado; duración = el minuto más largo registrado (regla elegible: nominal); sin el dato elegido el partido no cuenta; estados excluidos: ninguno |
+| 2 | ~~¿Todos los partidos de la serie o solo desde que el jugador llegó?~~ **Decidido (30-10-2026): se cuentan desde la primera citación del jugador.** Siguen abiertas: ¿entran amistosos y copas? ¿Sirve la duración reglamentaria (`matchlength`) o los minutos realmente jugados? ¿Qué estados de partido (`matchstatus`) no cuentan? | Partidos ya jugados de la competición donde el jugador fue citado, desde su primera citación (confirmado); duración = el minuto más largo registrado (regla elegible: nominal); sin el dato elegido el partido no cuenta; estados excluidos: ninguno |
 | 3 | ~~¿De dónde sale la lista oficial del plantel de cada serie para saber quién no fue citado?~~ **Respondida (13-10-2026): no se puede obtener y se mantiene como está.** | Confirmada: quienes figuran en otra planilla de la misma competición |
-| 4 | ¿A qué fecha se mide la edad para decir en qué categoría le corresponde jugar a un jugador? ¿Un jugador de 14 años en U-15 es «adelantado»? | 31 de diciembre del año de la temporada; la categoría por edad es la U-N más pequeña cuyo tope alcanza para su edad |
+| 4 | ~~¿A qué fecha se mide la edad para decir en qué categoría le corresponde jugar a un jugador?~~ **Decidido (30-10-2026): el 31 de diciembre del año de la temporada.** Sigue abierta: ¿un jugador de 14 años que está en U-15 es «adelantado»? | Fecha de corte confirmada. La categoría por edad es la U-N más pequeña cuyo tope alcanza para su edad, así que hoy un jugador de 14 años en U-15 cuenta como adelantado un escalón (provisional) |
 | 5 | ¿La antigüedad es desde que entró al club? La ficha trae `datefrom` para la mayoría: ¿es la fecha de ingreso? ¿Qué es «promoción»: subir de serie al año siguiente o también jugar partidos en la superior? ¿U-20 y Primer Equipo entran en la alerta? | Antigüedad = desde el primer partido registrado (un mínimo; la regla permite `datefrom`). Promoción = la categoría principal de la temporada es mayor que la del año anterior; Primer Equipo no se evalúa |
 | 6 | ~~¿Las amarillas se acumulan por campeonato o por temporada?~~ **Decidido (13-10-2026): por temporada completa en las categorías inferiores y por competición en el Primer Equipo.** Siguen abiertas: ¿se borran al cumplir una fecha de suspensión? ¿La segunda amarilla (`secondyellow`) cuenta como una o como dos amarillas? | Ciclo mixto confirmado. Las segundas amarillas se muestran y se avisan, pero no se suman; sin descontar suspensiones (ambas, pendientes) |
 | 7 | ¿Quiénes reciben el resumen semanal, qué día y a qué hora? Incluye nombres de menores: ¿se puede enviar por correo? | Sin destinatarios: no se envía nada |
@@ -131,6 +222,7 @@ Ninguna fila dice que un dato «falta» sin haberlo comprobado: un dato sin acce
 | Plantel oficial por categoría y temporada | No disponible en los datos leídos | No citados; minutos posibles exactos | Referencial por planillas |
 | Cronología del partido: tabla `eventos_partido` | En uso con cobertura parcial; requiere migración 004 | Marcador mientras el jugador estuvo en cancha | Se lee y valida contra el marcador final. El export disponible no trae goleadores rivales: ampliar el informe de origen. Los intervalos incompletos quedan sin dato |
 | `jugadores.datefrom` | Existe: significado por confirmar | Antigüedad en el club | La mayoría de las fichas la trae. Por defecto la antigüedad cuenta desde el primer partido; la regla permite `datefrom` (sin dato si falta, sin sustituirla) |
+| Fecha de salida o estado de baja del jugador | No disponible en los datos leídos | Plantel vigente (quién sigue en el club) | No hay un dato confiable en las columnas leídas: se usa la última planilla de O'Higgins, el alta reciente (`datefrom`) y las bajas que registra un administrador (reversibles). Si el proceso de COMET lo entregara, la regla automática dejaría de ser una aproximación |
 | Historial de categorías anterior al primer año leído | No disponible en los datos leídos | Temporadas sin promoción | La muestra leída llega a 2025-2026: la alerta no puede certificarse con ese horizonte |
 | `competiciones.matchlength` y `partidos.matchstatus` | Existe: significado por confirmar | Minutos posibles | Se leen. Duración registrada y nominal difieren en algunos partidos y ninguna es «la correcta» por sí sola: una regla elige la fuente y otra excluye estados. Falta contrastar con el club |
 | `actuaciones_jugadores.secondyellow` | Existe: en uso | Ciclo de tarjetas | Se muestra y se avisa en la alerta; no se suma. Falta definir cómo cuenta y las suspensiones cumplidas |
@@ -158,6 +250,14 @@ Los nombres de estatura y peso se buscan entre `height`/`heightcm`/`estatura`/`a
 Crea `portal.comet_settings`, `portal.comet_player_marks`, `portal.comet_selection_periods` y `portal.comet_digest_deliveries` (registro de entregas del resumen semanal), con RLS y permisos solo para `portal_runtime`
 (nada para `anon`, `authenticated`, `scouting_runtime` ni `comet_reader`). Es idempotente. **Debe aplicarla el propietario de la BD después de revisarla**,
 igual que `001` y `002`; esta PR no la aplica ni cambia producción. Reversión: no borrar esquemas; basta dejar de usar las pantallas (las tablas no afectan otras funciones).
+
+### Migración `db/portal/005_comet_player_bajas.sql` (no aplicada)
+
+Crea `portal.comet_player_bajas` (jugador, motivo, fecha, nota, y quién y cuándo hizo el último cambio), con RLS y permisos `SELECT, INSERT, UPDATE` solo para `portal_runtime`
+(nada para `anon`, `authenticated`, `scouting_runtime` ni `comet_reader`) y **sin `DELETE`**: una baja se desactiva al reincorporar al jugador. Solo guarda el identificador del jugador, no sus datos personales.
+Es idempotente y requiere `001_accounts.sql`. **Debe aplicarla el propietario de la BD después de revisarla**; esta PR no la aplica ni cambia producción.
+Sin ella, el plantel vigente funciona con la regla automática y los controles de baja quedan deshabilitados, con el motivo a la vista.
+Reversión: no borrar la tabla; basta reincorporar a los jugadores o dejar de usar el panel.
 
 ## Resumen semanal por correo
 
@@ -201,11 +301,14 @@ Comprobación de accesos con el portal real: Admin ve las doce secciones de COME
 
 | Ruta | Contenido |
 |---|---|
-| `src/scouting/comet/` | Cálculos puros: categorías, reglas, datos, métricas, alertas, indicadores, adelantados, calidad, `pipeline` (cálculo compartido con el resumen), resumen, correo, `ledger` (registro de entregas), consultas y almacén de configuración |
+| `src/scouting/comet/` | Cálculos puros: categorías, reglas, datos, métricas, alertas, indicadores, adelantados (con `player_timeline`, las subidas de categoría), `roster` (plantel vigente), `yearly` (cifras por año), calidad, `pipeline` (cálculo compartido con el resumen), resumen, correo, `ledger` (registro de entregas), consultas y almacén de configuración |
 | `app/comet_context.py` | Carga de datos y contexto con permisos y caché |
 | `app/comet_followup.py`, `app/comet_insights.py` | Las siete pantallas |
+| `app/comet_squad.py` | Plantel vigente en las pantallas antiguas: avisos, revisión del plantel y bajas |
+| `app/comet_matchlog.py` | Historial de partidos de un jugador con sus subidas de categoría (Ficha del jugador y Jugadores adelantados) |
 | `app/ui/comet_widgets.py` | Formato «—», etiquetas de estado, colores accesibles |
 | `db/portal/003_comet_followup.sql` | Migración de configuración (no aplicada) |
+| `db/portal/005_comet_player_bajas.sql` | Migración de las bajas de jugadores (no aplicada) |
 | `scripts/send_comet_weekly_digest.py` | Resumen semanal (vista previa por defecto) |
 | `scripts/comet_demo_*.py`, `scripts/demo_comet_followup.py` | Datos ficticios y demostración local |
 | `tests/test_comet_*.py`, `tests/comet_tiny.py` | Pruebas (cálculos a mano, seguridad, pantallas, SQL y migración) |
@@ -286,7 +389,7 @@ Quedan documentados con su reproducción para decidir cuál sigue (varios depend
 |---|---|---|---|
 | 1 | **Edad ausente = «no adelantado» y 0 minutos arriba.** Sin fecha de nacimiento, `ahead_minutes` queda en 0 (no «—») y el «% de adelantados» de la categoría los cuenta en el denominador | P2 sin nacimiento: la ficha muestra 0 minutos arriba y la categoría U-15 «0 de 3 adelantados (0,0 %)» en vez de «sin dato» | Excluir del denominador a quien no tiene edad y mostrar «—» |
 | 2 | **Con la duración «nominal», un partido ya pasado sin planilla ni marcador cuenta como minutos posibles** (con la duración «registrada», la de por defecto, no) | Un partido extra U-15 sin planilla: minutos posibles de P1 pasan de 240 a 320 y su participación de 58,3 % a 43,8 % | Que Pablo elija la fuente de duración y qué estados de partido no cuentan |
-| 3 | **Un jugador citado una sola vez en una serie suma todos los partidos de la serie como minutos posibles** (por defecto), lo que desinfla la participación de la serie | Seis invitados citados una vez en la U-15: participación de la serie de 51,0 % a 20,4 % | Pregunta 2 de Pablo (¿desde que llegó o toda la serie?) y, si se confirma, un mínimo de citaciones para contar como parte de la serie |
+| 3 | ~~**Un jugador citado una sola vez en una serie suma todos los partidos de la serie como minutos posibles** (por defecto), lo que desinfla la participación de la serie~~ **Resuelto el 30-10-2026:** los minutos posibles se cuentan desde la primera citación, así que un invitado solo suma los partidos desde que fue citado | Antes: seis invitados citados una vez en la U-15 bajaban la participación de la serie de 51,0 % a 20,4 % | Queda abierta la pregunta 2 de Pablo sobre amistosos y copas; el mínimo de citaciones para contar como parte de la serie no se decidió |
 | 4 | **«N temporadas seguidas en U-14» tras un descenso**: la racha cuenta temporadas sin subir de categoría, pero el texto afirma que estuvo todo ese tiempo en la categoría actual | Jugador en U-15 (2024) y U-14 (2025, 2026): «3 temporadas seguidas en U-14 (desde 2024)» | Pregunta 5 de Pablo (qué es «promoción»); mientras tanto, corregir el texto |
 | 5 | ~~**Amarillas con ciclo «por temporada»: la categoría mostrada es la de la última fila de la planilla**, no la principal~~ **Corregido el 13-10-2026:** la alerta de temporada muestra la categoría donde sumó más minutos | P2 (U-15 principal, U-14 secundaria) aparecía con categoría U-14 | — |
 | 6 | **«Adelantados» y «Grupo de edad» comparten jugadores** cuando alguien reparte minutos entre su categoría y la superior | P2 figura en los dos grupos de la categoría por edad U-14 | Decidir si el grupo de comparación debe excluir a los adelantados |

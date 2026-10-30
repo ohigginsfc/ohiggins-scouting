@@ -75,17 +75,21 @@ def test_age_on_respects_birthday_and_cutoff():
 def test_rule_status_never_presents_an_assumption_as_approved():
     rules = Rules()
     assert rules.status('yellow_threshold') == STATUS_REQUESTED
-    # Lo decidido con Pablo (13-10-2026) figura confirmado y deja constancia de quién y cuándo; el resto sigue pendiente.
+    # Lo decidido (reunión con Pablo del 13-10-2026 y decisiones comunicadas por el equipo del 30-10-2026) figura
+    # confirmado y deja constancia de quién y cuándo; el resto sigue pendiente.
     decided = {r.key for r in RULE_DEFS if r.decision}
-    assert decided == {'card_cycle', 'roster_rule'}
-    assert all('13-10-2026' in r.decision for r in RULE_DEFS if r.decision)
-    assert rules.status('card_cycle') == STATUS_CONFIRMED and rules.status('roster_rule') == STATUS_CONFIRMED
-    assert rules.status('second_yellow_rule') == STATUS_PENDING and rules.status('possible_from_first_call') == STATUS_PENDING
+    assert decided == {'card_cycle', 'roster_rule', 'age_cutoff', 'possible_from_first_call', 'min_minutes_on_pitch'}
+    assert all(r.decision.startswith(('Reunión con Pablo, 13-10-2026', 'Decisión comunicada por el equipo del proyecto el 30-10-2026'))
+               for r in RULE_DEFS if r.decision)
+    assert all(rules.status(key) == STATUS_CONFIRMED for key in decided)
+    assert rules.status('second_yellow_rule') == STATUS_PENDING and rules.status('duration_source') == STATUS_PENDING
     assert {r.key for r in rules.pending()} == {r.key for r in RULE_DEFS if r.origin == 'supuesto' and r.key not in decided}
-    approved = Rules({'possible_from_first_call': {'value': True, 'confirmed': True}})
-    assert approved.status('possible_from_first_call') == STATUS_CONFIRMED
+    approved = Rules({'duration_source': {'value': 'nominal', 'confirmed': True}})
+    assert approved.status('duration_source') == STATUS_CONFIRMED
     undone = Rules({'card_cycle': {'value': 'mixto', 'confirmed': False}})
     assert undone.status('card_cycle') == STATUS_PENDING, 'un administrador puede volver a dejarla pendiente'
+    changed = Rules({'possible_from_first_call': {'value': False}})
+    assert changed.status('possible_from_first_call') == STATUS_PENDING, 'la decisión vale solo para el valor decidido'
     assert all(r.question for r in rules.pending() if r.key != 'digest_weekday')
 
 
@@ -95,10 +99,12 @@ def test_invalid_stored_values_fall_back_and_strict_parse_rejects_them():
     assert (rules.value('yellow_threshold'), rules.value('card_cycle'), rules.value('age_cutoff')) == (4, 'mixto', '12-31')
     from scouting.comet.rules import RULES_BY_KEY
     for key, bad in [('yellow_threshold', 0), ('yellow_threshold', True), ('participation_threshold', 101),
-                     ('age_cutoff', '13-01'), ('digest_recipients', ['sin-arroba']), ('possible_from_first_call', 'si')]:
+                     ('age_cutoff', '13-01'), ('digest_recipients', ['sin-arroba']), ('possible_from_first_call', 'si'),
+                     ('min_minutes_on_pitch', -1), ('min_minutes_on_pitch', 91)]:
         with pytest.raises(ValueError):
             parse(RULES_BY_KEY[key], bad)
     assert parse(RULES_BY_KEY['age_cutoff'], '6-30') == '06-30'
+    assert parse(RULES_BY_KEY['min_minutes_on_pitch'], 0) == 0, '«sin mínimo» es un valor válido'
 
 
 # --- preparación de datos --------------------------------------------------------------------------------
@@ -184,25 +190,54 @@ def test_result_with_player_uses_minimum_minutes_rule():
     assert p2.wins_with == 0
 
 
-def test_possible_minutes_rules_from_first_call_and_selection_periods():
-    earlier = dict(matchid=9, competition_id=100, matchdate=pd.Timestamp('2026-02-28 15:00'), category='U-15',
-                   competition='Campeonato U-15 2026', season='2026', venue='Local', home_team='O', away_team='R',
-                   goals_for=1, goals_against=0, result='Victoria')
-    sheet = [sheet_row(9, 2, True, True, 80), sheet_row(9, 3, True, True, 80)]
-    ds, _ = dataset(extra_sheet=sheet, extra_matches=[earlier])
-    comp, _ = summaries(ds)
-    assert row(comp, 1, competition_id='100').possible_minutes == 320, 'cuenta también el partido anterior a su llegada'
-    ds_first, _ = dataset(Rules({'possible_from_first_call': {'value': True}}), extra_sheet=sheet, extra_matches=[earlier])
-    comp_first, _ = summaries(ds_first)
-    assert row(comp_first, 1, competition_id='100').possible_minutes == 240
-    assert row(comp_first, 2, competition_id='100').possible_minutes == 320, 'P2 sí fue citado en el partido 9'
+EARLIER_MATCH = dict(matchid=9, competition_id=100, matchdate=pd.Timestamp('2026-02-28 15:00'), category='U-15',
+                     competition='Campeonato U-15 2026', season='2026', venue='Local', home_team='O', away_team='R',
+                     goals_for=1, goals_against=0, result='Victoria')
+EARLIER_SHEET = [sheet_row(9, 2, True, True, 80), sheet_row(9, 3, True, True, 80)]   # P1 no fue citado ese día
 
+
+def test_possible_minutes_count_from_the_first_call_by_default():
+    """Decidido el 30-10-2026: los minutos posibles se cuentan desde la primera citación del jugador."""
+    ds, _ = dataset(extra_sheet=EARLIER_SHEET, extra_matches=[EARLIER_MATCH])
+    assert ds.rules.value('possible_from_first_call') is True
+    comp, _ = summaries(ds)
+    assert row(comp, 1, competition_id='100').possible_minutes == 240, 'el partido anterior a su llegada no cuenta'
+    assert row(comp, 2, competition_id='100').possible_minutes == 320, 'P2 sí fue citado en el partido 9'
+    ds_all, _ = dataset(Rules({'possible_from_first_call': {'value': False}}),
+                        extra_sheet=EARLIER_SHEET, extra_matches=[EARLIER_MATCH])
+    comp_all, _ = summaries(ds_all)
+    assert row(comp_all, 1, competition_id='100').possible_minutes == 320, 'apagada: cuenta también el partido anterior'
+    assert row(comp_all, 2, competition_id='100').possible_minutes == 320
+
+
+def test_without_a_minimum_every_participation_counts_for_the_match_result():
+    """Decidido el 30-10-2026: no hay minutos mínimos. Con un mínimo, un minuto desconocido no se da por suficiente."""
+    players = [dict(personid=p, displayname=f'X{p}', dateofbirth='2011-01-01', nationality='Chile', level='F',
+                    status='ACTIVO', orgname='O') for p in (6, 7)]
+    extra = [sheet_row(1, 6, True, True, None), sheet_row(3, 7, True, False, 1)]
+    ds, _ = dataset(extra_sheet=extra, extra_players=players)
+    assert ds.rules.value('min_minutes_on_pitch') == 0
+    comp, _ = summaries(ds)
+    p6, p7 = row(comp, 6, competition_id='100'), row(comp, 7, competition_id='100')
+    assert (p6.wins_with, p6.results_with) == (1, 1), 'jugó sin minutos conocidos: sin mínimo el resultado cuenta'
+    assert pd.isna(p6.minutes), 'y sus minutos siguen sin inventarse'
+    assert (p7.losses_with, p7.results_with) == (1, 1), 'un solo minuto también cuenta'
+    ds_min, _ = dataset(Rules({'min_minutes_on_pitch': {'value': 5}}), extra_sheet=extra, extra_players=players)
+    comp_min, _ = summaries(ds_min)
+    assert row(comp_min, 6, competition_id='100').results_with == 0, 'con un mínimo, el minuto desconocido no alcanza'
+    assert row(comp_min, 7, competition_id='100').results_with == 0
+
+
+def test_selection_periods_discount_possible_minutes_only_when_the_player_did_not_play():
+    first_call_off = {'possible_from_first_call': {'value': False}}   # deja los 320 min. posibles del P1 del caso anterior
+    ds, _ = dataset(Rules(first_call_off), extra_sheet=EARLIER_SHEET, extra_matches=[EARLIER_MATCH])
     # P1 no jugó el partido 3 (21-03): dentro de un período de selección se descuenta de sus minutos posibles.
     periods = pd.DataFrame([dict(personid='1', start=pd.Timestamp('2026-03-21'), end=pd.Timestamp('2026-03-22'),
                                  kind='microciclo', active=True)])
     comp_off, _ = summaries(ds, periods)
     assert row(comp_off, 1, competition_id='100').possible_minutes == 320, 'con la regla apagada solo se muestran'
-    ds_on, _ = dataset(Rules({'exclude_selection_periods': {'value': True}}), extra_sheet=sheet, extra_matches=[earlier])
+    ds_on, _ = dataset(Rules({**first_call_off, 'exclude_selection_periods': {'value': True}}),
+                       extra_sheet=EARLIER_SHEET, extra_matches=[EARLIER_MATCH])
     comp_on, _ = summaries(ds_on, periods)
     p1 = row(comp_on, 1, competition_id='100')
     assert p1.possible_minutes == 240 and p1.participation_pct == pytest.approx(140 / 240 * 100)

@@ -51,10 +51,11 @@ def possible_grid(ds: Dataset, periods: Optional[pd.DataFrame] = None) -> pd.Dat
 
     Es el único conjunto de partidos para el denominador (minutos posibles) y para el numerador
     (minutos jugados que se comparan): así la participación no puede superar el 100 % por usar
-    conjuntos distintos. Regla supuesta (pendiente de Pablo): todos los partidos ya jugados de la
-    competición donde el jugador fue citado alguna vez. Quedan fuera los partidos sin duración
-    conocida, los de un estado excluido por regla y, si la regla está encendida, los que caen dentro
-    de un período de selección **y el jugador no jugó** (si los jugó, el partido cuenta).
+    conjuntos distintos. Los partidos ya jugados de la competición donde el jugador fue citado, desde su
+    primera citación (decidido el 30-10-2026; con la regla `possible_from_first_call` apagada, todos los de
+    la competición). Quedan fuera los partidos sin duración conocida, los de un estado excluido por regla
+    y, si la regla está encendida, los que caen dentro de un período de selección **y el jugador no jugó**
+    (si los jugó, el partido cuenta).
     """
     rules = ds.rules
     duration = match_duration(ds)
@@ -96,7 +97,9 @@ def player_competition_summary(ds: Dataset, periods: Optional[pd.DataFrame] = No
     """Una fila por jugador y competición: partidos, roles, minutos, goles, tarjetas y resultados."""
     f = ds.facts
     min_minutes = ds.rules.value('min_minutes_on_pitch')
-    on_pitch = f['participated'] & (f['minutes'] >= min_minutes)
+    # Sin mínimo cuenta todo partido en que participó, también con minutos desconocidos; con mínimo, un minuto
+    # desconocido no se da por suficiente.
+    on_pitch = f['participated'] if min_minutes <= 0 else f['participated'] & (f['minutes'] >= min_minutes)
     known = on_pitch & f['result'].notna()
     work = f.assign(
         is_starter=f['role'].eq(ROLE_STARTER), is_sub_in=f['role'].eq(ROLE_SUB_IN),
@@ -218,6 +221,7 @@ def ranking(cat_summary: pd.DataFrame, metric: str, *, category: str, season_yea
             top: Optional[int] = None, include_incomplete: bool = False) -> pd.DataFrame:
     """Ranking de una categoría y temporada. Empates comparten posición; sin datos o en 0 no entran.
 
+    `top` limita cuántos jugadores se devuelven: `None` es todos, `0` ninguno, `n` los primeros n.
     Los jugadores con planillas contradictorias no entran: sus cifras están incompletas y ordenarlos
     sería engañoso (`incomplete_players` los lista para avisarlo en pantalla).
     """
@@ -230,7 +234,7 @@ def ranking(cat_summary: pd.DataFrame, metric: str, *, category: str, season_yea
     scope = scope.sort_values([column] + tie_break + ['displayname'], ascending=[False, False, True],
                               na_position='last')
     scope = scope.assign(position=scope[column].rank(method='min', ascending=False).astype(int))
-    return scope.head(top) if top else scope
+    return scope if top is None else scope.head(max(int(top), 0))
 
 
 def minutes_timeline(ds: Dataset, personid: str, freq: str = 'Mes') -> pd.DataFrame:

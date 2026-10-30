@@ -11,6 +11,7 @@ from typing import Callable, Mapping, Optional
 import pandas as pd
 import streamlit as st
 
+from scouting.comet import yearly
 from scouting.comet.alerts import ALERT_COLORS
 from scouting.comet.rules import RULES_BY_KEY, STATUS_CONFIRMED, STATUS_PENDING, STATUS_REQUESTED
 
@@ -66,6 +67,11 @@ def fmt(value, decimals: int = 0, suffix: str = '') -> str:
     if value is None or (not isinstance(value, str) and pd.isna(value)):
         return MISSING
     return f'{value:.{decimals}f}{suffix}'
+
+
+def year_filter(years: list[int], key: str, label: str = 'Año') -> Optional[int]:
+    """Selector del año de la temporada: «Todos los años» (None) o uno de los años con datos, el más reciente primero."""
+    return st.selectbox(label, [None] + list(years), format_func=yearly.label, key=key)
 
 
 def rule_note(rules, keys: list[str]) -> None:

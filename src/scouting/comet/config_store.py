@@ -1,16 +1,16 @@
-"""Persistencia en Supabase (esquema privado `portal`) de reglas, alertas, marcas y períodos.
+"""Persistencia en Supabase (esquema privado `portal`) de reglas, alertas, marcas, períodos y bajas de jugadores.
 
 Solo administración lee o escribe: cada función llama a `require_admin()` antes de abrir
 una conexión. COMET se lee con `comet_reader` (solo lectura) y no guarda nada; por eso esta
 configuración vive en `portal`, con la conexión `portal_runtime` que ya usan las cuentas.
-Requiere aplicar `db/portal/003_comet_followup.sql`; si no está aplicada, lanza
-`StoreUnavailable` y la interfaz sigue con los valores por defecto, en solo lectura.
+Requiere aplicar `db/portal/003_comet_followup.sql` (y `005_comet_player_bajas.sql` para las bajas); si no está
+aplicada, lanza `StoreUnavailable` y la interfaz sigue con los valores por defecto, en solo lectura.
 """
 from __future__ import annotations
 
 import re
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -22,25 +22,29 @@ from scouting.portal.security import require_admin
 from scouting.portal.readonly_pilot import writable_only
 
 from .alerts import ALERT_COLORS, ALERTS_BY_KEY
+from .roster import BAJA_COLUMNS, BAJA_REASONS, EMPTY_BAJAS
 from .rules import RULES_BY_KEY, parse
 
 MARKS = {'proyectado': 'Jugador proyectado', 'seleccion': 'Jugador de selección'}
 PERIOD_KINDS = {'microciclo': 'Microciclo de selección', 'sudamericano': 'Sudamericano', 'mundial': 'Mundial'}
 ALERT_CONFIG_KEY = 'alert_config'
+FOLLOWUP_MIGRATION = '003_comet_followup.sql'
+BAJAS_MIGRATION = '005_comet_player_bajas.sql'
+MAX_BAJAS_AT_ONCE = 200
 _ID = re.compile(r'^[0-9A-Za-z_-]{1,40}$')
 
 
 class StoreUnavailable(RuntimeError):
-    """La base de configuración no está disponible o falta aplicar la migración 003."""
+    """La base de configuración no está disponible o falta aplicar una migración (003 o 005)."""
 
 
 @contextmanager
-def _db():
+def _db(migration: str = FOLLOWUP_MIGRATION):
     try:
         with accounts.connect() as db:
             yield db
     except psycopg.errors.UndefinedTable:
-        raise StoreUnavailable('Falta aplicar db/portal/003_comet_followup.sql en Supabase.') from None
+        raise StoreUnavailable(f'Falta aplicar db/portal/{migration} en Supabase.') from None
     except (RuntimeError, psycopg.OperationalError):
         raise StoreUnavailable('No se pudo conectar con la configuración de Supabase.') from None
 
@@ -73,6 +77,19 @@ def clean_period(personid, kind: str, starts_on: date, ends_on: date, note: str 
     if ends_on < starts_on:
         raise ValueError('La fecha de término no puede ser anterior a la de inicio.')
     return clean_person(personid), kind, starts_on, ends_on, clean_note(note)
+
+
+def clean_baja(personid, reason: str, effective_on, note: str = '', *, today: date | None = None) -> tuple:
+    """Valida una baja: jugador, motivo de la lista, fecha razonable (hasta mañana, por la diferencia de huso) y nota."""
+    if reason not in BAJA_REASONS:
+        raise ValueError('Motivo de baja desconocido.')
+    if isinstance(effective_on, datetime):
+        effective_on = effective_on.date()
+    if not isinstance(effective_on, date):
+        raise ValueError('La fecha de la baja no es válida.')
+    if effective_on < date(2000, 1, 1) or effective_on > (today or date.today()) + timedelta(days=1):
+        raise ValueError('La fecha de la baja no puede ser futura ni anterior al año 2000.')
+    return clean_person(personid), reason, effective_on, clean_note(note)
 
 
 def clean_setting(key: str, value: Any) -> Any:
@@ -213,3 +230,84 @@ def retire_period(period_id: int) -> None:
     with _db() as db:
         db.execute('UPDATE portal.comet_selection_periods SET active = false, retired_by = %s, retired_at = now() '
                    'WHERE id = %s AND active', (actor['id'], int(period_id)))
+
+
+# --- Bajas de jugadores (migración 005) ---------------------------------------------------------------
+
+_BAJAS_SELECT = ('SELECT personid, active, reason, effective_on, note, updated_at FROM portal.comet_player_bajas '
+                 'ORDER BY updated_at DESC')
+
+
+def _fetch_bajas(db) -> pd.DataFrame:
+    return pd.DataFrame(db.execute(_BAJAS_SELECT).fetchall(), columns=BAJA_COLUMNS)
+
+
+def load_bajas() -> pd.DataFrame:
+    """Bajas registradas (vigentes y reincorporadas). `StoreUnavailable` si falta aplicar la migración 005."""
+    require_admin()
+    with _db(BAJAS_MIGRATION) as db:
+        return _fetch_bajas(db)
+
+
+def load_bajas_for_job() -> pd.DataFrame:
+    """Igual que `load_bajas` para el script operativo del resumen semanal (sin sesión; solo lee). Ver `load_all_for_job`."""
+    with _db(BAJAS_MIGRATION) as db:
+        return _fetch_bajas(db)
+
+
+def load_roster_config() -> tuple[dict, pd.DataFrame, str | None]:
+    """Reglas guardadas y bajas con una sola conexión, para las pantallas del plantel.
+
+    Si falta la migración 005 devuelve las reglas con una lista de bajas vacía y el motivo (la regla automática sigue
+    funcionando); si falta la 003 o no hay conexión, lanza `StoreUnavailable`.
+    """
+    require_admin()
+    with _db() as db:
+        settings = db.execute('SELECT key, value, confirmed FROM portal.comet_settings').fetchall()
+        present = db.execute("SELECT to_regclass('portal.comet_player_bajas') IS NOT NULL AS present").fetchone()['present']
+        bajas = _fetch_bajas(db) if present else None
+    stored = {r['key']: {'value': r['value'], 'confirmed': r['confirmed']} for r in settings}
+    if bajas is None:
+        return stored, EMPTY_BAJAS, f'Falta aplicar db/portal/{BAJAS_MIGRATION} en Supabase.'
+    return stored, bajas, None
+
+
+@writable_only
+def set_bajas(personids, reason: str, effective_on, note: str = '') -> int:
+    """Da de baja a uno o varios jugadores con el mismo motivo, fecha y nota (una sola transacción). No borra nada:
+    una baja anterior del mismo jugador se actualiza y vuelve a quedar vigente. Devuelve cuántos se registraron."""
+    actor = require_admin()
+    ids = sorted({clean_person(p) for p in personids})
+    if not ids:
+        raise ValueError('Elige al menos un jugador.')
+    if len(ids) > MAX_BAJAS_AT_ONCE:
+        raise ValueError(f'Registra hasta {MAX_BAJAS_AT_ONCE} bajas a la vez.')
+    _, reason, day, note = clean_baja(ids[0], reason, effective_on, note)
+    with _db(BAJAS_MIGRATION) as db:
+        for pid in ids:
+            db.execute(
+                'INSERT INTO portal.comet_player_bajas(personid, active, reason, effective_on, note, created_by, updated_by) '
+                'VALUES (%s, true, %s, %s, %s, %s, %s) '
+                'ON CONFLICT (personid) DO UPDATE SET active = true, reason = EXCLUDED.reason, '
+                'effective_on = EXCLUDED.effective_on, note = EXCLUDED.note, '
+                'updated_by = EXCLUDED.updated_by, updated_at = now()',
+                (pid, reason, day, note, actor['id'], actor['id']))
+    return len(ids)
+
+
+@writable_only
+def reinstate_bajas(personids) -> int:
+    """Reincorpora a jugadores: la baja queda inactiva (con quién y cuándo), no se borra.
+
+    Devuelve a cuántos se reincorporó de verdad: quien ya no tenía una baja vigente (otra persona lo reincorporó antes) no cuenta.
+    """
+    actor = require_admin()
+    ids = sorted({clean_person(p) for p in personids})
+    if not ids:
+        raise ValueError('Elige al menos un jugador.')
+    changed = 0
+    with _db(BAJAS_MIGRATION) as db:
+        for pid in ids:
+            changed += db.execute('UPDATE portal.comet_player_bajas SET active = false, updated_by = %s, updated_at = now() '
+                                  'WHERE personid = %s AND active', (actor['id'], pid)).rowcount
+    return changed

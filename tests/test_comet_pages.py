@@ -70,10 +70,19 @@ def test_weekly_match_shows_every_sheet_block(comet_env):
 
 
 def test_pending_rules_are_labelled_as_assumptions_not_approved(comet_env):
-    app = render('Rankings por categoría')
+    app = render('Alertas')
     notes = ' '.join(m.value for m in app.markdown if 'cm-note' in m.value)
     assert 'pendiente de confirmar' in notes
     assert 'aprobada' not in notes.lower()
+
+
+def test_rules_the_club_already_decided_are_not_shown_as_provisional(comet_env):
+    """Fecha de corte, minutos posibles desde la primera citación y sin mínimo de minutos (decididos el 30-10-2026)."""
+    for page in ('Rankings por categoría', 'Indicadores', 'Ficha del jugador'):
+        notes = ' '.join(m.value for m in render(page).markdown if 'cm-note' in m.value)
+        for decided in ('Fecha de corte de edad', 'Minutos posibles: contar desde la primera citación',
+                        'Minutos mínimos para contar el resultado del partido'):
+            assert decided not in notes, (page, decided)
 
 
 def test_tracking_screen_degrades_without_store(comet_env):

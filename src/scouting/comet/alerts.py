@@ -8,7 +8,7 @@ from typing import Any, Mapping, Optional
 import pandas as pd
 
 from .categories import SENIOR_RANK
-from .facts import Dataset
+from .facts import Dataset, norm_id
 from .metrics import principal_categories, seasons_without_promotion
 
 # nombre -> (color de texto y borde, color de fondo). Siempre se acompaña de texto: el color no es el único aviso.
@@ -179,8 +179,12 @@ def _no_promotion(principal: pd.DataFrame, season_year: int, threshold: int) -> 
 
 
 def evaluate_alerts(ds: Dataset, cat_summary: pd.DataFrame, season_year: int,
-                    config: Optional[Mapping[str, Any]] = None) -> pd.DataFrame:
-    """Alertas vigentes de una temporada. Cada fila es un jugador y una alerta."""
+                    config: Optional[Mapping[str, Any]] = None, exclude=None) -> pd.DataFrame:
+    """Alertas vigentes de una temporada. Cada fila es un jugador y una alerta.
+
+    `exclude`: identificadores de jugadores que no se evalúan (bajas registradas: alguien que ya no está en el club no
+    debe aparecer con «baja participación»). Quien llama decide cuándo aplicarlo; aquí solo se quita de la lista.
+    """
     config = resolve_config(config)
     rules = ds.rules
     parts = []
@@ -199,6 +203,8 @@ def evaluate_alerts(ds: Dataset, cat_summary: pd.DataFrame, season_year: int,
     out = pd.concat(parts, ignore_index=True)
     # Jugadores con planillas contradictorias: sus cifras están incompletas, no se evalúan (se avisan aparte).
     out = out[~out['personid'].isin(ds.blocked_players(season_year)['personid'])]
+    if exclude:
+        out = out[~out['personid'].map(norm_id).isin(set(exclude))]
     if out.empty:
         return _empty().assign(alert='', color='')
     out['alert'] = out['alert_key'].map(lambda k: alert_label(k, rules))
