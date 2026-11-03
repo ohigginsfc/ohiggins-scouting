@@ -6,6 +6,9 @@ from pathlib import Path
 import streamlit as st
 from ui.theme import inject_ohiggins_theme
 
+# Incrementar al publicar una nueva versión del portal.
+PORTAL_VERSION = '1.1.0'
+
 
 def crest():
     data = (Path(__file__).resolve().parents[1] / 'assets/OHigginsFC.png').read_bytes()
@@ -40,6 +43,7 @@ def inject_portal_brand():
     .club-card h2 {color:#102e46;font-size:28px;margin:0 0 4px;}
     .club-card h3 {color:#39779f;font-size:16px;margin:0 0 14px;}
     .club-card p {color:#52697b;line-height:1.65;font-size:14px;}
+    .club-version {margin-top:24px;text-align:right;font-size:12px;line-height:1.5;color:#52697b;}
     .club-login {position:relative;overflow:hidden;background:linear-gradient(115deg,#102e46,#1c4b6b);
         border-radius:22px;padding:28px 36px;margin:12px 0 24px;border-bottom:6px solid #75b9e5;}
     .club-login:after {content:'';position:absolute;right:-55px;top:-95px;width:340px;height:340px;
@@ -122,3 +126,8 @@ def module_card(number, title, subtitle):
     st.markdown(f'''<div class="club-card"><div class="club-card-head"><h2>{escape(title)}</h2>
     <span class="club-card-number">{escape(number)}</span></div>
     <h3>{escape(subtitle)}</h3></div>''', unsafe_allow_html=True)
+
+
+def version_footer():
+    st.markdown(f'<div class="club-version" title="Versión del portal">v{escape(PORTAL_VERSION)}</div>',
+                unsafe_allow_html=True)
