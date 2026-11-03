@@ -1037,18 +1037,20 @@ def _style_recommendation_dataframe(rows: list[dict[str, Any]]) -> Any:
         return rows
     df = pd.DataFrame(rows)
     if "Valoración" in df.columns:
-        # Como texto: sin los seis decimales del tipo numeric (6.5, no 6.500000) y con «—» donde no hay valoración;
-        # en una columna numérica la celda vacía se vería como «None».
-        df["Valoración"] = df["Valoración"].map(format_rating_for_ui)
-    df = df.fillna("—")  # una celda sin dato se ve «—», no «None»
+        # Conservar números para ordenar 10 por encima de 2; el Styler solo cambia cómo se muestran.
+        df["Valoración"] = pd.to_numeric(df["Valoración"], errors="coerce")
+    df = df.fillna({column: "—" for column in df.columns if column != "Valoración"})
 
     def _rec_style(val: Any) -> str:
         styles = recommendation_tone(str(val) if val is not None else None)
         return "; ".join(f"{k}: {v}" for k, v in styles.items())
 
-    if "Recomendación" not in df.columns:
-        return df
-    return df.style.map(_rec_style, subset=["Recomendación"])
+    styled = df.style
+    if "Recomendación" in df.columns:
+        styled = styled.map(_rec_style, subset=["Recomendación"])
+    if "Valoración" in df.columns:
+        styled = styled.format({"Valoración": format_rating_for_ui}, na_rep="—")
+    return styled
 
 
 HIDDEN_PREVIEW_LIMIT = 5

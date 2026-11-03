@@ -13,6 +13,7 @@ import numpy as np
 import psycopg
 import pytest
 from psycopg import sql
+from streamlit.dataframe_util import convert_arrow_bytes_to_pandas_df
 from streamlit.testing.v1 import AppTest
 
 from scouting.repositories import dashboard_repository
@@ -244,7 +245,7 @@ def test_dashboard_previews_hidden_reports_for_both_roles(dashboard, user):
     assert len(previews) == 1
     row = previews[0].iloc[0]
     assert row['Jugador'] == 'Jugador de prueba' and row['Ocultado por'] == 'Admin' and row['Recomendación'] == 'Interesante'
-    assert row['Valoración'] == '7', 'sin los decimales de sobra del tipo numeric'
+    assert row['Valoración'] == 7, 'la valoración conserva su tipo numérico para poder ordenar'
     assert row['Resumen (inicio)'].startswith('Resumen de prueba') and row['Resumen (inicio)'].endswith('…')
     assert len(row['Resumen (inicio)']) <= 140
     captions = ' '.join(c.value for c in app.caption)
@@ -458,7 +459,7 @@ def test_recent_activity_never_shows_none_as_a_position(dashboard, monkeypatch):
 
 
 def test_tables_show_a_dash_where_there_is_no_data_never_none_or_a_filled_in_rating(dashboard, monkeypatch):
-    """Una celda vacía de una columna numérica se vería «None»: la valoración va como texto, «—» sin dato y sin decimales de sobra."""
+    """La valoración sigue siendo numérica; su formato visual muestra «—» sin dato y sin decimales de sobra."""
     rows = [recent(id=1, rating=None, scout_name=None, competition=None, recommendation=None),
             recent(id=2, rating=Decimal('6.000000')),
             recent(id=3, rating=Decimal('7.500000')),
@@ -468,13 +469,18 @@ def test_tables_show_a_dash_where_there_is_no_data_never_none_or_a_filled_in_rat
     dashboard.calls['hidden'].return_value = [{**HIDDEN, 'rating': None, 'scout_name': None}]
     app = dashboard(ADMIN)
     assert not app.exception, [e.value for e in app.exception]
-    activity = next(d.value for d in app.dataframe if 'Fecha' in d.value.columns and 'Competición' in d.value.columns)
-    assert list(activity['Valoración']) == ['—', '6', '7.5', '0'], 'un 0 real se ve 0; la falta de dato, «—»'
+    activity_element = next(d for d in app.dataframe if 'Fecha' in d.value.columns and 'Competición' in d.value.columns)
+    activity = activity_element.value
+    assert np.isnan(activity.iloc[0]['Valoración']) and activity['Valoración'].iloc[1:].tolist() == [6, 7.5, 0]
+    displayed = convert_arrow_bytes_to_pandas_df(activity_element.proto.styler.display_values)
+    assert displayed['Valoración'].tolist() == ['—', '6', '7.5', '0'], 'un 0 real se ve 0; la falta de dato, «—»'
     assert list(activity.iloc[0][['Scout', 'Competición', 'Recomendación']]) == ['—', '—', '—']
-    preview = next(d.value for d in app.dataframe if 'Resumen (inicio)' in d.value.columns)
-    assert preview.iloc[0]['Valoración'] == '—' and preview.iloc[0]['Scout'] == '—'
+    preview_element = next(d for d in app.dataframe if 'Resumen (inicio)' in d.value.columns)
+    preview = preview_element.value
+    assert np.isnan(preview.iloc[0]['Valoración']) and preview.iloc[0]['Scout'] == '—'
+    assert convert_arrow_bytes_to_pandas_df(preview_element.proto.styler.display_values).iloc[0]['Valoración'] == '—'
     for table in (activity, preview):
-        assert not table.isna().any().any() and 'None' not in table.astype(str).to_numpy()
+        assert not table.drop(columns='Valoración').isna().any().any() and 'None' not in table.astype(str).to_numpy()
 
 
 def test_refresh_button_reads_the_reports_again(dashboard, monkeypatch):

@@ -68,6 +68,27 @@ def test_a_real_zero_is_a_value_not_a_missing_rating():
     assert format_rating_for_ui(0) == '0' and format_rating_for_ui(Decimal('0')) == '0'
 
 
+@pytest.mark.parametrize('with_recommendation', [False, True])
+def test_report_table_keeps_ratings_numeric_for_sorting_and_formats_missing_values(with_recommendation):
+    import pandas as pd
+    from streamlit_app import _style_recommendation_dataframe
+
+    rows = [{'Valoración': value, 'Scout': None} for value in [Decimal('1'), Decimal('2'), Decimal('10'), None, Decimal('6.5'), 0]]
+    if with_recommendation:
+        for row in rows:
+            row['Recomendación'] = 'Interesante'
+    styled = _style_recommendation_dataframe(rows)
+    data = styled if isinstance(styled, pd.DataFrame) else styled.data
+    assert pd.api.types.is_numeric_dtype(data['Valoración']), 'sorting must use scores rather than their text labels'
+    ordered = data.sort_values('Valoración', ascending=False)['Valoración'].tolist()
+    assert ordered[:-1] == [10, 6.5, 2, 1, 0] and pd.isna(ordered[-1])
+    assert pd.isna(data.loc[3, 'Valoración']), 'a missing score stays missing in the underlying data'
+    assert data['Scout'].tolist() == ['—'] * len(rows)
+    html = styled.to_html()
+    assert '>—</td>' in html and '>6.5</td>' in html and '>10</td>' in html
+    assert '>nan</td>' not in html and '>10.000000</td>' not in html
+
+
 # --- «Actualizar informe»: reglas del servicio, sin base de datos ---------------------------------------------------------------
 
 @pytest.fixture
