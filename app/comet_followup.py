@@ -3,11 +3,13 @@ from __future__ import annotations
 
 from datetime import timedelta
 from html import escape
+from typing import Optional
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+import comet_matchlog
 from comet_context import Context, context, season_choices
 from scouting.comet import config_store, events, metrics
 from scouting.comet.categories import age_on
@@ -183,6 +185,19 @@ def _bar(frame: pd.DataFrame, value: str, label: str, name: str = 'displayname')
     st.plotly_chart(fig, use_container_width=True)
 
 
+def ranking_limit(total: int, key: str) -> Optional[int]:
+    """Control «Mostrar»: de 0 hasta todos los jugadores de la categoría. Devuelve el tope, o None si se piden todos.
+
+    Con más de 20 jugadores arranca en 20; con 20 o menos, en «Todos». Sin jugadores no hay nada que elegir.
+    """
+    if total < 1:
+        return None
+    shown = st.select_slider('Mostrar (jugadores)', options=list(range(total + 1)), value=min(total, 20), key=key,
+                             format_func=lambda n: 'Todos' if n == total else str(n),
+                             help=f'De 0 hasta todos los jugadores de la categoría en esta temporada ({total}).')
+    return None if shown == total else int(shown)
+
+
 @admin_only
 def page_rankings() -> None:
     inject_styles()
@@ -200,9 +215,10 @@ def page_rankings() -> None:
     with c2:
         category = st.selectbox('Categoría', in_season, key='cr_category',
                                 index=in_season.index('U-15') if 'U-15' in in_season else 0)
+    ranked_players = cat[(cat['season_year'] == season) & (cat['category'] == category) & (cat['incomplete'] == 0)]
     with c3:
-        top = st.select_slider('Mostrar', options=[10, 20, 50, 'Todos'], value=20, key='cr_top')
-    limit = None if top == 'Todos' else int(top)
+        # La clave cambia con la categoría y la temporada: cada una tiene otro total y no hereda la elección anterior.
+        limit = ranking_limit(len(ranked_players), f'cr_top_{season}_{category}')
     excluded = metrics.incomplete_players(cat, category=category, season_year=season)
     if len(excluded):
         names = ', '.join(_label(n) for n in excluded['displayname'].head(8))
@@ -213,6 +229,9 @@ def page_rankings() -> None:
     tabs = st.tabs(['Minutos jugados', 'Goles', 'Tarjetas', 'Victorias finales en partidos jugados'])
 
     def board(metric: str, value: str, label: str, extra: dict, chart: bool = True) -> None:
+        if limit == 0:
+            st.info('Mostrando 0 jugadores. Sube el control «Mostrar» para ver el ranking.')
+            return
         ranked = metrics.ranking(ctx.computed.cat, metric, category=category, season_year=season, top=limit)
         if ranked.empty:
             st.info('Nadie tiene datos para este ranking en la categoría y temporada elegidas.')
@@ -410,7 +429,7 @@ def page_player() -> None:
                                'adelantado': ('Categorías por encima de su edad', None),
                                'ahead_minutes': ('Minutos en categoría superior', FMT_INT)})
         st.caption('La categoría en que juega es donde sumó más minutos esa temporada. La edad se mide en la fecha de '
-                   'corte configurada (supuesto pendiente de confirmar).')
+                   'corte de la regla «Fecha de corte de edad» (por defecto, el 31 de diciembre del año de la temporada).')
     with tabs[2]:
         freq = st.radio('Agrupar minutos por', ['Mes', 'Semestre'], horizontal=True, key='cp_freq')
         timeline = metrics.minutes_timeline(ds, personid, freq)
@@ -432,24 +451,7 @@ def page_player() -> None:
             st.caption('Solo se muestran los períodos en que O’Higgins jugó en las categorías donde el jugador fue citado; '
                        'un mes sin partidos no se dibuja como cero, y un mes con minutos desconocidos no se dibuja como una suma parcial.')
     with tabs[3]:
-        log = facts.sort_values('matchdate', ascending=False).assign(
-            fecha=lambda d: d['matchdate'].dt.strftime('%d-%m-%Y'),
-            rival=lambda d: d['rival'].map(lambda r: _label(r, 'rival sin nombre')),
-            marcador=lambda d: [None if pd.isna(a) or pd.isna(b) else f'{int(a)}-{int(b)}'
-                                for a, b in zip(d['goals_for'], d['goals_against'])])
-        log = events.attach_results(log, ctx.computed.onpitch)
-        show_table(log, {'fecha': ('Fecha', None), 'category': ('Categoría', None), 'rival': ('Rival', None),
-                         'venue': ('Local / Visita', None), 'marcador': ('Marcador final', None), 'result': ('Resultado final', None),
-                         'role': ('Rol', None), 'minutes': ('Minutos', FMT_INT), 'goals': ('Goles', FMT_INT),
-                         'yellow_cards': ('Amarillas', FMT_INT), 'red_cards': ('Rojas', FMT_INT),
-                         'onpitch_entry': ('Entró', None), 'onpitch_exit': ('Salió', None),
-                         'onpitch_score_entry': ('Marcador al entrar', None), 'onpitch_state_entry': ('Al entrar', None),
-                         'onpitch_score_exit': ('Marcador al salir', None), 'onpitch_state_exit': ('Al salir', None),
-                         'onpitch_changed': ('¿Cambió el resultado?', None),
-                         'onpitch_for': ('Goles a favor en cancha', FMT_INT), 'onpitch_against': ('Goles en contra en cancha', FMT_INT),
-                         'onpitch_status': ('Cronología', None)},
-                   colors=('result', RESULT_COLORS))
-        st.caption('Gol y cambio en el mismo minuto: se cuenta el gol con el jugador dentro.')
+        comet_matchlog.render_match_log(ctx, personid, key='cp_log')
     with tabs[4]:
         keeper = ds.goalkeepers[ds.goalkeepers['personid'] == personid]
         keeper = keeper[((keeper['played'] == True).fillna(False) | (keeper['minutesplayed'] > 0)).astype(bool)]  # noqa: E712

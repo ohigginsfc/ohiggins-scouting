@@ -37,7 +37,7 @@ sys.path.insert(0, str(ROOT / 'src'))
 import pandas as pd
 
 from scouting.comet import alerts as alert_rules
-from scouting.comet import config_store, mailer, queries
+from scouting.comet import config_store, mailer, queries, roster
 from scouting.comet.digest import build_weekly_digest, previous_week
 from scouting.comet.facts import LOCAL_TZ
 from scouting.comet.ledger import DEFAULT_MAX_ATTEMPTS, PostgresLedger
@@ -67,8 +67,21 @@ def load_stored(env):
         return {}, NO_PERIODS, str(exc)
 
 
-def run(argv=None, *, env=None, load_raw=None, stored=None, now=None, smtp_factory=None, ledger=None, out=print):
-    """`stored` = (reglas, períodos, aviso); `ledger` = registro de entregas (por defecto, el de Supabase)."""
+def load_bajas(env):
+    """(bajas, aviso). Sin configuración o sin la migración 005 no se aplica ninguna baja y se avisa."""
+    if not env.get('PORTAL_AUTH_DATABASE_URL', '').strip():
+        return roster.EMPTY_BAJAS, 'PORTAL_AUTH_DATABASE_URL no está definida'
+    try:
+        return config_store.load_bajas_for_job(), None
+    except config_store.StoreUnavailable as exc:
+        return roster.EMPTY_BAJAS, str(exc)
+
+
+def run(argv=None, *, env=None, load_raw=None, stored=None, bajas=None, now=None, smtp_factory=None, ledger=None, out=print):
+    """`stored` = (reglas, períodos, aviso); `bajas` = jugadores dados de baja; `ledger` = registro de entregas (por defecto, el de Supabase).
+
+    Con `stored` dado (pruebas) y sin `bajas` no se consulta Supabase: no se aplica ninguna baja.
+    """
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--week-of', help='una fecha dentro de la semana a resumir (AAAA-MM-DD); por defecto, la semana anterior')
     parser.add_argument('--html-out', help='guarda la versión HTML en este archivo')
@@ -90,6 +103,10 @@ def run(argv=None, *, env=None, load_raw=None, stored=None, now=None, smtp_facto
     settings, periods, warning = stored if stored is not None else load_stored(env)
     if warning:
         out(f'Aviso: se usan las reglas por defecto y sin períodos de selección ({warning}).')
+    if bajas is None:
+        bajas, bajas_warning = (roster.EMPTY_BAJAS, None) if stored is not None else load_bajas(env)
+        if bajas_warning and not warning:
+            out(f'Aviso: no se aplican las bajas de jugadores ({bajas_warning}).')
     alert_key = config_store.ALERT_CONFIG_KEY
     computed = compute_all(load_raw(), {k: v for k, v in settings.items() if k != alert_key}, periods)
     ds, rules = computed.ds, computed.ds.rules
@@ -99,7 +116,10 @@ def run(argv=None, *, env=None, load_raw=None, stored=None, now=None, smtp_facto
     else:
         week_start = previous_week(today)[0]
     season = ds.current_season(pd.Timestamp(week_start + timedelta(days=6)))
-    found = (alert_rules.evaluate_alerts(ds, computed.cat, season, (settings.get(alert_key) or {}).get('value'))
+    # Las bajas solo quitan alertas de la temporada en curso (las pasadas son historia), igual que en la pantalla.
+    excluded = roster.active_baja_ids(bajas) if season is not None and season == ds.current_season(today) else frozenset()
+    found = (alert_rules.evaluate_alerts(ds, computed.cat, season, (settings.get(alert_key) or {}).get('value'),
+                                         exclude=excluded)
              if season else pd.DataFrame(columns=['alert_key']))
     digest = build_weekly_digest(ds, found, week_start, generated_on=today.date(), pending_rules=len(rules.pending()),
                                  blocked=len(ds.blocked_players(season)) if season else 0,

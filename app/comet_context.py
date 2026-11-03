@@ -5,7 +5,7 @@ resultados en caché no se entregan a quien no sea administrador y no se abre ni
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import pandas as pd
@@ -13,7 +13,7 @@ import streamlit as st
 
 import comet_dashboard as comet
 from scouting.comet import alerts as alert_rules
-from scouting.comet import config_store, queries
+from scouting.comet import config_store, queries, roster
 from scouting.comet.facts import LOCAL_TZ, Dataset
 from scouting.comet.pipeline import Computed, compute_all
 from scouting.comet.rules import Rules
@@ -38,6 +38,12 @@ class Context:
     store_error: Optional[str]
     today: pd.Timestamp
     season: Optional[int]
+    bajas: pd.DataFrame = field(default_factory=lambda: roster.EMPTY_BAJAS)  # jugadores dados de baja (migración 005)
+    bajas_error: Optional[str] = None
+
+    def alert_exclusions(self, season: Optional[int]) -> frozenset:
+        """Jugadores con baja que no entran en las alertas: solo en la temporada en curso (las pasadas son historia)."""
+        return roster.active_baja_ids(self.bajas) if season is not None and season == self.season else frozenset()
 
     @property
     def ds(self) -> Dataset:
@@ -70,6 +76,15 @@ def load_config() -> tuple[dict, pd.DataFrame, pd.DataFrame, Optional[str]]:
 
 
 @admin_only
+def load_bajas() -> tuple[pd.DataFrame, Optional[str]]:
+    """Bajas de jugadores guardadas en Supabase; sin la migración 005 o sin conexión, ninguna y el motivo."""
+    try:
+        return config_store.load_bajas(), None
+    except config_store.StoreUnavailable as exc:
+        return roster.EMPTY_BAJAS, str(exc)
+
+
+@admin_only
 @st.cache_data(ttl=600, show_spinner='Calculando indicadores…')
 def compute(raw: dict, stored_rules: dict, periods: pd.DataFrame) -> Computed:
     """Mismo cálculo que el resumen semanal (`scouting.comet.pipeline`), guardado en caché para las pantallas."""
@@ -80,13 +95,14 @@ def compute(raw: dict, stored_rules: dict, periods: pd.DataFrame) -> Computed:
 def context() -> Context:
     raw = load_raw()
     stored, marks, periods, error = load_config()
+    bajas, bajas_error = load_bajas()
     computed = compute(raw, {k: v for k, v in stored.items() if k != config_store.ALERT_CONFIG_KEY}, periods)
     today = now()
     return Context(
         computed=computed,
         alert_config=alert_rules.resolve_config((stored.get(config_store.ALERT_CONFIG_KEY) or {}).get('value')),
         marks=marks, periods=periods, store_error=error, today=today,
-        season=computed.ds.current_season(today))
+        season=computed.ds.current_season(today), bajas=bajas, bajas_error=bajas_error)
 
 
 def season_choices(ctx: Context) -> list[int]:

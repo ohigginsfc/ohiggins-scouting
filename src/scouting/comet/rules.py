@@ -59,24 +59,30 @@ RULE_DEFS: tuple[RuleDef, ...] = (
         'abajo, escribe los topes separados por coma.'),
     RuleDef(
         'age_cutoff', 'Fecha de corte de edad (mes-día)', '12-31', ORIGIN_ASSUMED, 'text',
-        'La edad se mide el 31 de diciembre del año de la temporada. Cada categoría U-N reúne hasta N años; '
-        'la categoría por edad es la más pequeña que alcanza para su edad.',
-        '¿A qué fecha se mide la edad para decir en qué categoría le corresponde jugar a un jugador '
-        '(por ejemplo, el 31 de diciembre del año de la temporada)? ¿Un jugador de 14 años que está en U-15 '
-        'se considera adelantado?'),
+        'La edad se mide el 31 de diciembre del año de la temporada (decidido el 30-10-2026). Cada categoría U-N reúne '
+        'hasta N años; la categoría por edad es la más pequeña que alcanza para su edad.',
+        '¿Un jugador de 14 años que está en U-15 se considera adelantado (un escalón por encima de la categoría que le '
+        'corresponde por edad)?',
+        decision='Decisión comunicada por el equipo del proyecto el 30-10-2026: la edad se mide el 31 de diciembre del año '
+                 'de la temporada.'),
     RuleDef(
-        'min_minutes_on_pitch', 'Minutos mínimos para contar el resultado del partido', 1, ORIGIN_ASSUMED, 'int',
-        'Los indicadores históricos de victorias usan el resultado final de partidos en que jugó al menos '
-        'este número de minutos. El marcador real al entrar y salir se calcula por separado con eventos '
-        'en Partido semanal y Ficha del jugador; no depende de este mínimo.',
-        '¿Qué mínimo de minutos debe contar para el indicador de victorias finales en partidos jugados?',
-        minimum=1, maximum=90),
+        'min_minutes_on_pitch', 'Minutos mínimos para contar el resultado del partido', 0, ORIGIN_ASSUMED, 'int',
+        'Sin mínimo (0, decidido el 30-10-2026): los indicadores históricos de victorias usan el resultado final de todos los '
+        'partidos en que el jugador participó, aunque jugara pocos minutos o no se conozcan sus minutos. Si se fija un mínimo, '
+        'solo cuentan los partidos en que jugó al menos esos minutos; un partido sin minutos conocidos no se da por suficiente. '
+        'El marcador real al entrar y salir se calcula por separado con eventos en Partido semanal y Ficha del jugador; '
+        'no depende de este mínimo.',
+        minimum=0, maximum=90,
+        decision='Decisión comunicada por el equipo del proyecto el 30-10-2026: no habrá minutos mínimos para contar el '
+                 'resultado del partido.'),
     RuleDef(
-        'possible_from_first_call', 'Minutos posibles: contar desde la primera citación', False, ORIGIN_ASSUMED, 'bool',
-        'Apagado: los minutos posibles son los de todos los partidos ya jugados de la categoría y competición '
-        'donde el jugador fue citado alguna vez. Encendido: solo desde su primera citación.',
-        '¿Qué partidos cuentan como minutos posibles? ¿Todos los de la serie, o solo desde que el jugador '
-        'llegó a la serie? ¿Entran amistosos y copas?'),
+        'possible_from_first_call', 'Minutos posibles: contar desde la primera citación', True, ORIGIN_ASSUMED, 'bool',
+        'Encendido (decidido el 30-10-2026): los minutos posibles son los de los partidos ya jugados de la categoría y '
+        'competición donde el jugador fue citado, contados desde su primera citación. Apagado: los de todos los partidos de esa '
+        'competición, también los anteriores a su llegada.',
+        '¿Entran los amistosos y las copas en los minutos posibles?',
+        decision='Decisión comunicada por el equipo del proyecto el 30-10-2026: los minutos posibles se cuentan desde la '
+                 'primera citación del jugador.'),
     RuleDef(
         'duration_source', 'Minutos posibles: duración de cada partido', 'registrada', ORIGIN_ASSUMED, 'choice',
         'Registrada: el minuto más largo jugado por alguien de O\'Higgins en ese partido (incluye descuentos). '
@@ -142,6 +148,16 @@ RULE_DEFS: tuple[RuleDef, ...] = (
         '¿Qué es una «promoción»: subir de serie de un año al siguiente, o también jugar partidos en la serie '
         'superior? ¿Los jugadores de U-20 y de Primer Equipo entran en esta alerta?',
         editable=False),
+    RuleDef(
+        'squad_activity_days', 'Plantel vigente: días sin planilla para dejar de contar a un jugador', 365, ORIGIN_ASSUMED, 'int',
+        'COMET no borra a quien deja el club, así que sin esta regla el Primer Equipo suma a todos los jugadores que alguna vez '
+        'estuvieron registrados. Cuenta como parte del plantel quien figuró en la planilla de un partido de O\'Higgins dentro de '
+        'esta cantidad de días, o cuya ficha trae un «datefrom» dentro de ese plazo (alta reciente), y quien no tenga una baja '
+        'registrada. Nadie se borra: los demás quedan fuera de las cifras y se pueden ver y reincorporar en Estructura del plantel.',
+        '¿Desde cuándo un jugador deja de contar como parte del plantel si no aparece en ninguna planilla (hoy: 365 días)? '
+        '¿Un jugador del Primer Equipo que no ha jugado pero tiene contrato vigente debe contarse igual? '
+        '¿Qué significa la fecha «datefrom» de la ficha de COMET y existe una fecha de salida o de fin de contrato que se pueda usar?',
+        minimum=30, maximum=1825),
     RuleDef(
         'digest_recipients', 'Destinatarios del resumen semanal', [], ORIGIN_ASSUMED, 'list',
         'Sin destinatarios definidos no se envía nada. El resumen se puede ver en pantalla.',

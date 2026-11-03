@@ -35,6 +35,13 @@ PIPELINE_DEPENDENCIES: tuple[dict, ...] = (
          hoy='La mayoría de las fichas la trae, pero su significado no está confirmado. Por defecto la antigüedad cuenta '
              'desde el primer partido registrado; la regla permite usar «datefrom» (sin dato si falta, sin sustituirla).'),
     dict(estado=MISSING,
+         dato='Fecha de salida o estado de baja de cada jugador (quién sigue realmente en el club)',
+         para='Plantel vigente: no contar como parte del plantel a quienes ya no están (Primer Equipo y categorías menores)',
+         hoy='En las columnas que el portal lee no hay una fecha de salida ni un estado de baja confiable. Mientras tanto se usa '
+             'la última planilla de O’Higgins, el alta reciente (datefrom) y las bajas que registra un administrador, que se '
+             'pueden revertir. Si el proceso de COMET entregara ese dato, la regla automática dejaría de ser una aproximación. '
+             'No se modificó dataProject.'),
+    dict(estado=MISSING,
          dato='Historial de categorías anterior al primer año leído',
          para='Temporadas sin promoción de categoría',
          hoy='Se cuenta con las temporadas leídas; el aviso indica desde qué año. La alerta no puede certificarse con un '

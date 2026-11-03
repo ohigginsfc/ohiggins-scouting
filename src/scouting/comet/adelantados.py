@@ -22,6 +22,28 @@ def _complete_facts(ds: Dataset, season_year: int) -> pd.DataFrame:
     return ds.facts[(ds.facts['season_year'] == season_year) & ~ds.facts['personid'].isin(left_out_players(ds, season_year))]
 
 
+def player_timeline(ds: Dataset, personid: str) -> pd.DataFrame:
+    """Todos los partidos de un jugador, del primero al último, con las subidas de categoría marcadas.
+
+    * `ascended`: el primer partido jugado en una categoría más alta que todas en las que ya había jugado. Hace falta
+      un partido jugado anterior: sin historial no se afirma una subida (COMET solo conoce los partidos registrados).
+    * `highest_before`: la categoría más alta en que había jugado antes de ese partido.
+    * `ascents`: cuántas subidas lleva hasta ese partido, inclusive.
+    * `ahead`: juega en una categoría por encima de la que le corresponde por su edad.
+
+    No se quita ningún partido: también quedan las citaciones sin jugar.
+    """
+    f = ds.facts[ds.facts['personid'] == personid].sort_values(['matchdate', 'matchid']).reset_index(drop=True)
+    played_rank = f['category_rank'].where(f['participated'])
+    best_before = played_rank.cummax().ffill().shift()          # ffill: una citación sin jugar no borra lo jugado antes
+    labels = f.dropna(subset=['category_rank']).drop_duplicates('category_rank').set_index('category_rank')['category']
+    f['ascended'] = (f['participated'] & best_before.notna() & (f['category_rank'] > best_before)).astype(bool)
+    f['highest_before'] = best_before.map(labels)
+    f['ascents'] = f['ascended'].cumsum()
+    f['ahead'] = (f['steps_ahead'] > 0).astype(bool)
+    return f
+
+
 def ahead_players(ds: Dataset, season_year: int) -> pd.DataFrame:
     """Jugadores con minutos en una categoría superior a la que les corresponde por edad."""
     f = _complete_facts(ds, season_year)
