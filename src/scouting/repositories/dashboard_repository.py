@@ -57,6 +57,29 @@ def get_position_counts_by_nationality(conn: Connection) -> list[dict[str, Any]]
         return list(cur.fetchall())
 
 
+def get_hidden_position_counts(conn: Connection) -> list[dict[str, Any]]:
+    """Por posición de ficha: jugadores con informes OCULTOS e informes ocultos asociados.
+
+    Los jugadores sin posición en su ficha salen en una fila con `position = None`: no se pueden ubicar en el
+    campograma, pero tampoco se dejan sin contar.
+    """
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """
+            SELECT
+                CASE WHEN p.position IS NULL OR trim(p.position) = '' THEN NULL ELSE p.position END AS position,
+                COUNT(DISTINCT p.id)::int AS players_count,
+                COUNT(DISTINCT sr.id)::int AS reports_count
+            FROM players p
+            INNER JOIN scouting_reports sr ON sr.player_id = p.id
+            WHERE COALESCE(sr.is_hidden, FALSE) = TRUE
+            GROUP BY 1
+            ORDER BY 1 ASC NULLS LAST
+            """
+        )
+        return list(cur.fetchall())
+
+
 def get_position_summary(conn: Connection, position: str, *, season: str | None = None) -> list[dict[str, Any]]:
     """
     Una fila por jugador scouteado con la posición indicada en ficha.
