@@ -356,6 +356,50 @@ def test_goalkeeper_stats_by_year_separate_goals_conceded_by_season(comet_conn, 
     assert yearly.keeper_stats_for_year(by_year, 2025).iloc[0].clean_sheet_pct == 100.0
 
 
+@pytest.mark.parametrize('session_zone', ['UTC', 'Pacific/Honolulu'])
+@pytest.mark.parametrize('reader_name, metric, expected', [
+    ('get_player_stats_by_year', 'goals', {2025: 2, 2026: 3}),
+    ('get_goalkeeper_stats_by_year', 'goals_conceded', {2025: 1, 2026: 2}),
+])
+def test_yearless_season_uses_santiago_year_at_new_year_in_real_sql(
+    comet_conn, monkeypatch, session_zone, reader_name, metric, expected,
+):
+    """El año de respaldo y la agrupación SQL usan Santiago, independientemente de la zona de la conexión."""
+    conn, _ = comet_conn
+    conn.execute("SELECT set_config('TimeZone', %s, true)", (session_zone,))
+    conn.execute("INSERT INTO competiciones (id, category, name, season) "
+                 "VALUES (800, 'U-15', 'Copa sin año', 'Copa sin año')")
+    for matchid, instant, goals, conceded, minutes in [
+        (800, '2026-01-01 01:00:00+00', 2, 1, 40),  # 31 de diciembre de 2025 en Santiago
+        (801, '2026-01-01 04:00:00+00', 3, 2, 50),  # 1 de enero de 2026 en Santiago
+    ]:
+        conn.execute('INSERT INTO partidos (id, matchid, matchdate, hometeam, awayteam) '
+                     'VALUES (800, %s, %s, %s, 1)', (matchid, instant, CLUB))
+        conn.execute('INSERT INTO actuaciones_jugadores '
+                     '(id, matchid, personid, clubid, played, startinglineup, minutesplayed, goals, '
+                     'singleyellow, redcards, goalkeeper) '
+                     'VALUES (800, %s, 1, %s, true, true, %s, %s, false, 0, false)',
+                     (matchid, CLUB, minutes, goals))
+        conn.execute('INSERT INTO actuaciones_arqueros '
+                     '(id, matchid, personid, clubid, played, minutesplayed, goalsconceded) '
+                     'VALUES (800, %s, 3, %s, true, %s, %s)', (matchid, CLUB, minutes, conceded))
+    raw = queries.fetch_raw(_loader(conn))
+    ds = build_dataset(raw['sheet'], raw['matches'], raw['players'], raw['goalkeepers'])
+    history = ds.matches[ds.matches['competition_id'] == '800'].set_index('matchid')
+    assert history['season_year'].to_dict() == {'800': 2025, '801': 2026}
+
+    monkeypatch.syspath_prepend(str(Path('app').resolve()))
+    import comet_dashboard as dashboard
+    monkeypatch.setattr(dashboard, 'load_data', _loader(conn))
+    st.cache_data.clear()
+    with security.session_scope({}, verified_user=ADMIN):
+        rows = getattr(dashboard, reader_name)('U-15')
+    rows = rows[rows['season'] == 'Copa sin año'].set_index('season_year')
+    assert rows[metric].to_dict() == expected, 'el SELECT y el GROUP BY deben separar los dos años de Santiago'
+    assert rows['matches'].to_dict() == {2025: 1, 2026: 1}
+    assert rows['minutes'].to_dict() == {2025: 40, 2026: 50}
+
+
 def test_match_results_carry_the_season_so_team_goals_can_be_filtered_by_year(comet_conn, monkeypatch):
     conn, _ = comet_conn
     monkeypatch.syspath_prepend(str(Path('app').resolve()))
