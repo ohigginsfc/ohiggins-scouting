@@ -100,6 +100,8 @@ def test_write_actions_stop_before_database_or_email(cloud_config, monkeypatch):
                lambda: config_store.set_mark('1', 'proyectado', True),
                lambda: config_store.add_period('1', 'microciclo', date.today(), date.today()),
                lambda: config_store.retire_period(1),
+               lambda: config_store.set_bajas(['1'], 'cedido', date.today()),
+               lambda: config_store.reinstate_bajas(['1']),
                lambda: config_store.reserve_delivery_for_job(date.today(), 'test@example.test'),
                lambda: config_store.finish_delivery_for_job(date.today(), 'test@example.test', sent=True),
                lambda: security.require_report_management(None, 1)]

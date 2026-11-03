@@ -24,8 +24,10 @@ OH_GRAY = "#6B7280"
 
 LOGO_PATH = os.path.join(os.path.dirname(__file__), "assets", "OHigginsFC.png")
 
+from scouting.comet import queries, yearly
 from scouting.comet.categories import DEFAULT_LADDER_CAPS, SENIOR_LABEL, age_category_case_sql
 from scouting.portal.security import admin_only, require_admin
+from ui.comet_widgets import FMT_INT, show_table, year_filter
 
 # Secciones del club (Pablo, 13-10-2026): sub-20, sub-18, sub-16, sub-15, sub-14, sub-13, sub-12 «y así».
 YOUTH_CATEGORIES = [f"U-{cap}" for cap in DEFAULT_LADDER_CAPS]
@@ -109,10 +111,14 @@ def get_standings_by_category(category: Optional[str] = None) -> pd.DataFrame:
     return df
 
 
-@admin_only
-@st.cache_data(ttl=600)
-def get_player_stats_by_category(category: Optional[str] = None) -> pd.DataFrame:
-    query = f"""
+# Una fila por jugador, categoría, temporada y año del partido: `yearly` las junta por año de temporada (el año del partido
+# solo sirve de respaldo, en hora de Santiago, cuando el nombre de la temporada no trae año). Así los goles se pueden separar por año.
+MATCH_YEAR_SQL = "(SELECT matchid, MIN(matchdate) AS matchdate FROM partidos GROUP BY matchid)"
+
+
+def player_stats_by_year_sql(by_category: bool = False) -> str:
+    category = "AND c.category = %(cat)s" if by_category else ""
+    return f"""
         SELECT
             j.personid,
             j.displayname,
@@ -120,86 +126,67 @@ def get_player_stats_by_category(category: Optional[str] = None) -> pd.DataFrame
             j.nationality,
             j.level,
             c.category,
+            c.season,
+            EXTRACT(YEAR FROM m.matchdate AT TIME ZONE 'America/Santiago')::int AS match_year,
             COUNT(DISTINCT a.matchid) AS matches,
             SUM(a.minutesplayed) AS minutes,
             SUM(CASE WHEN a.startinglineup THEN 1 ELSE 0 END) AS starts,
             SUM(a.goals) AS goals,
             SUM(a.singleyellow::int) AS yellow_cards,
-            SUM(a.redcards::int) AS red_cards,
-            ROUND(
-                CAST(SUM(a.minutesplayed) AS NUMERIC)
-                / NULLIF(COUNT(DISTINCT a.matchid), 0),
-                0
-            ) AS avg_minutes,
-            ROUND(
-                CAST(SUM(a.goals) AS NUMERIC) * 90.0
-                / NULLIF(SUM(a.minutesplayed), 0),
-                2
-            ) AS goals_per90
+            SUM(a.redcards::int) AS red_cards
         FROM actuaciones_jugadores a
         JOIN jugadores j ON a.personid = j.personid
         JOIN competiciones c ON a.id = c.id
+        LEFT JOIN {MATCH_YEAR_SQL} m ON m.matchid = a.matchid
         WHERE a.clubid = {OHIGGINS_CLUB_ID}
           AND a.played = TRUE
           AND (a.goalkeeper IS NULL OR a.goalkeeper = FALSE)
-    """
-    params = None
-    if category:
-        query += " AND c.category = %(cat)s"
-        params = {"cat": category}
-    query += """
+          {category}
         GROUP BY
-            j.personid, j.displayname, j.dateofbirth,
-            j.nationality, j.level, c.category
-        HAVING SUM(a.minutesplayed) > 0
-        ORDER BY SUM(a.minutesplayed) DESC;
+            j.personid, j.displayname, j.dateofbirth, j.nationality, j.level,
+            c.category, c.season, EXTRACT(YEAR FROM m.matchdate AT TIME ZONE 'America/Santiago');
     """
-    return load_data(query, params)
 
 
-@admin_only
-@st.cache_data(ttl=600)
-def get_goalkeeper_stats_by_category(category: Optional[str] = None) -> pd.DataFrame:
-    query = f"""
+def goalkeeper_stats_by_year_sql(by_category: bool = False) -> str:
+    category = "AND c.category = %(cat)s" if by_category else ""
+    return f"""
         SELECT
             j.personid,
             j.displayname,
             EXTRACT(YEAR FROM AGE(j.dateofbirth)) AS age,
             c.category,
+            c.season,
+            EXTRACT(YEAR FROM m.matchdate AT TIME ZONE 'America/Santiago')::int AS match_year,
             COUNT(DISTINCT a.matchid) AS matches,
             SUM(a.minutesplayed) AS minutes,
             SUM(a.goalsconceded) AS goals_conceded,
-            SUM(
-                CASE WHEN a.goalsconceded = 0 AND a.played THEN 1 ELSE 0 END
-            ) AS clean_sheets,
-            ROUND(
-                CAST(SUM(a.goalsconceded) AS NUMERIC) * 90.0
-                / NULLIF(SUM(a.minutesplayed), 0),
-                2
-            ) AS gc_per90,
-            ROUND(
-                CAST(
-                    SUM(CASE WHEN a.goalsconceded = 0 THEN 1 ELSE 0 END)
-                    AS NUMERIC
-                ) * 100.0 / NULLIF(COUNT(DISTINCT a.matchid), 0),
-                1
-            ) AS clean_sheet_pct
+            SUM(CASE WHEN a.goalsconceded = 0 AND a.played THEN 1 ELSE 0 END) AS clean_sheets
         FROM actuaciones_arqueros a
         JOIN jugadores j ON a.personid = j.personid
         JOIN competiciones c ON a.id = c.id
+        LEFT JOIN {MATCH_YEAR_SQL} m ON m.matchid = a.matchid
         WHERE a.clubid = {OHIGGINS_CLUB_ID}
           AND a.played = TRUE
+          {category}
+        GROUP BY j.personid, j.displayname, j.dateofbirth, c.category, c.season, EXTRACT(YEAR FROM m.matchdate AT TIME ZONE 'America/Santiago');
     """
-    params = None
-    if category:
-        query += " AND c.category = %(cat)s"
-        params = {"cat": category}
-    query += """
-        GROUP BY j.personid, j.displayname, j.dateofbirth, c.category
-        HAVING SUM(a.minutesplayed) > 0
-        ORDER BY SUM(a.minutesplayed) DESC;
-    """
-    return load_data(query, params)
+
+
+@admin_only
+@st.cache_data(ttl=600)
+def get_player_stats_by_year(category: Optional[str] = None) -> pd.DataFrame:
+    """Jugadores de campo por categoría y año de temporada (`season_year`); `yearly.stats_for_year` elige un año o suma todos."""
+    frame = load_data(player_stats_by_year_sql(bool(category)), {"cat": category} if category else None)
+    return yearly.with_season_year(frame)
+
+
+@admin_only
+@st.cache_data(ttl=600)
+def get_goalkeeper_stats_by_year(category: Optional[str] = None) -> pd.DataFrame:
+    """Arqueros por categoría y año de temporada (`season_year`); `yearly.keeper_stats_for_year` elige un año o suma todos."""
+    frame = load_data(goalkeeper_stats_by_year_sql(bool(category)), {"cat": category} if category else None)
+    return yearly.with_season_year(frame)
 
 
 @admin_only
@@ -225,6 +212,7 @@ def get_match_results_by_category(category: Optional[str] = None) -> pd.DataFram
             p.matchdate,
             c.category,
             c.name AS competition,
+            c.season,
             e_home.club AS home_team,
             e_away.club AS away_team,
             s.final_home,
@@ -271,7 +259,27 @@ def get_match_results_by_category(category: Optional[str] = None) -> pd.DataFram
 
 
 AGE_SQL = "EXTRACT(YEAR FROM AGE(j.dateofbirth))"
-SQUAD_BY_AGE_SQL = f"""
+
+
+def squad_sql(columns: frozenset = frozenset()) -> str:
+    """Jugadores registrados como activos de O'Higgins, con el último partido en cuya planilla figuraron.
+
+    `last_match` (planillas de jugadores y arqueros del club) y `datefrom` (solo si esa columna existe en COMET) permiten
+    decidir quién sigue en el plantel: COMET no borra a quien se va (ver `scouting.comet.roster`).
+    """
+    datefrom = 'j.datefrom' if ('jugadores', 'datefrom') in columns else 'NULL'
+    return f"""
+        WITH last_sheet AS (
+            SELECT s.personid, MAX(p.matchdate) AS last_match
+            FROM (
+                SELECT a.personid, a.matchid FROM actuaciones_jugadores a WHERE a.clubid = {OHIGGINS_CLUB_ID}
+                UNION ALL
+                SELECT g.personid, g.matchid FROM actuaciones_arqueros g WHERE g.clubid = {OHIGGINS_CLUB_ID}
+            ) s
+            JOIN partidos p ON p.matchid = s.matchid
+            WHERE p.matchdate IS NOT NULL AND p.matchdate < NOW()
+            GROUP BY s.personid
+        )
         SELECT
             j.personid,
             j.displayname,
@@ -280,12 +288,18 @@ SQUAD_BY_AGE_SQL = f"""
             j.nationality,
             j.level,
             j.status,
-            {age_category_case_sql(AGE_SQL)} AS age_category
+            {age_category_case_sql(AGE_SQL)} AS age_category,
+            ls.last_match,
+            {datefrom} AS datefrom
         FROM jugadores j
+        LEFT JOIN last_sheet ls ON ls.personid = j.personid
         WHERE LOWER(j.orgname) LIKE '%higgins%'
           AND j.status = 'ACTIVO'
         ORDER BY age DESC;
     """
+
+
+SQUAD_BY_AGE_SQL = squad_sql()   # solo con las columnas del dashboard antiguo (lo usan las pruebas contra PostgreSQL)
 
 
 @admin_only
@@ -295,8 +309,11 @@ def get_squad_by_age_category() -> pd.DataFrame:
 
     La regla es la misma de `scouting.comet.categories.category_for_age`: antes los rangos se solapaban (15 años aparecía
     en U-16 y U-15, 14 en U-15 y U-13) y no existía U-14, U-18 ni U-20.
+
+    Devuelve todos los registrados como activos; las pantallas cuentan solo el plantel vigente
+    (`comet_squad.load_roster`), porque COMET no borra a quien deja el club y lo sigue mostrando como activo.
     """
-    return load_data(SQUAD_BY_AGE_SQL)
+    return load_data(squad_sql(frozenset(queries.available_columns(load_data))))
 
 
 def category_badge(category: str) -> str:
@@ -358,8 +375,11 @@ def page_executive_summary():
         unsafe_allow_html=True,
     )
 
+    import comet_squad  # dentro de la función: comet_squad no se importa al cargar este módulo (evita importarse en círculo)
+
     categories_overview = get_categories_overview()
-    squad = get_squad_by_age_category()
+    roster = comet_squad.load_roster(get_squad_by_age_category())
+    squad = roster.current   # solo el plantel vigente: COMET sigue mostrando como activo a quien deja el club
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -392,6 +412,7 @@ def page_executive_summary():
         st.metric("Jugadores Profesionales", professionals)
         st.markdown("</div>", unsafe_allow_html=True)
 
+    comet_squad.render_notice(roster)
     st.markdown("---")
     st.subheader("🏆 Vista General por Categoría")
 
@@ -475,14 +496,22 @@ def page_youth_development():
         unsafe_allow_html=True,
     )
 
-    squad = get_squad_by_age_category()
-    selected_cat = st.selectbox(
-        "Selecciona Categoría",
-        YOUTH_CATEGORIES,
-        key="youth_cat",
-    )
+    import comet_squad
 
-    if squad.empty or "age_category" not in squad.columns:
+    roster = comet_squad.load_roster(get_squad_by_age_category())
+    squad = roster.current
+    pick_category, pick_year = st.columns(2)
+    with pick_category:
+        selected_cat = st.selectbox(
+            "Selecciona Categoría",
+            YOUTH_CATEGORIES,
+            key="youth_cat",
+        )
+    stats_by_year = get_player_stats_by_year(selected_cat)
+    with pick_year:
+        year = year_filter(yearly.years_available(stats_by_year), key=f"youth_year_{selected_cat}")
+
+    if roster.classified.empty or "age_category" not in squad.columns:
         st.warning("No hay datos de plantel juvenil disponibles.")
         return
 
@@ -504,14 +533,18 @@ def page_youth_development():
         else:
             st.metric("% Chilenos", "—")
 
+    comet_squad.render_notice(roster)
+    comet_squad.render_baja_panel(roster, selected_cat)
     st.markdown("---")
 
-    player_stats = get_player_stats_by_category(selected_cat)
+    stats_by_year = comet_squad.exclude_former(stats_by_year, roster, "youth_include_former")
+    player_stats = yearly.stats_for_year(stats_by_year, year)
+    period = yearly.label(year)
     if player_stats.empty:
-        st.info(f"No hay estadísticas disponibles para {selected_cat}.")
+        st.info(f"No hay estadísticas disponibles para {selected_cat} ({period}).")
         return
 
-    st.subheader(f"⭐ Mejores Jugadores - {selected_cat}")
+    st.subheader(f"⭐ Mejores Jugadores - {selected_cat} · {period}")
 
     tab1, tab2, tab3 = st.tabs(
         ["🎯 Goleadores", "⏱️ Más Utilizados", "📊 Rendimiento Global"]
@@ -528,7 +561,7 @@ def page_youth_development():
                     top_scorers,
                     x="displayname",
                     y="goals",
-                    title="Top 10 Goleadores",
+                    title=f"Top 10 Goleadores ({period})",
                     labels={"displayname": "Jugador", "goals": "Goles"},
                     color="goals",
                     color_continuous_scale=[OH_GOLD, OH_BLUE],
@@ -552,6 +585,16 @@ def page_youth_development():
                     hide_index=True,
                     use_container_width=True,
                 )
+            st.markdown("**Goles por año de estos jugadores**")
+            by_scorer = yearly.goals_by_year(stats_by_year, top_scorers)
+            show_table(by_scorer, {
+                "displayname": ("Jugador", None),
+                **{col: (col, FMT_INT) for col in yearly.year_columns(by_scorer)},
+                "Total": ("Total", FMT_INT),
+            })
+            st.caption(
+                "Cada columna es un año de temporada. «—» es un año en que el jugador no tiene partidos en esta categoría."
+            )
 
     with tab2:
         top_minutes = player_stats.nlargest(15, "minutes")
@@ -573,11 +616,12 @@ def page_youth_development():
             st.plotly_chart(fig, use_container_width=True)
 
     with tab3:
+        most_matches = int(player_stats["matches"].max())
         min_matches = st.slider(
             "Mínimo de partidos",
             0,
-            int(player_stats["matches"].max()),
-            3,
+            most_matches,
+            min(3, most_matches),
         )
         filtered_stats = player_stats[player_stats["matches"] >= min_matches].copy()
         if filtered_stats.empty:
@@ -631,13 +675,24 @@ def page_competition_performance():
         st.warning("No hay datos de competiciones disponibles.")
         return
 
-    selected_cat = st.selectbox("Selecciona Categoría", all_cats, key="comp_cat")
+    pick_category, pick_year = st.columns(2)
+    with pick_category:
+        selected_cat = st.selectbox("Selecciona Categoría", all_cats, key="comp_cat")
 
-    standings = get_standings_by_category(selected_cat)
+    standings = yearly.with_season_year(get_standings_by_category(selected_cat))
     matches = get_match_results_by_category(selected_cat)
+    if not matches.empty:
+        matches = yearly.with_season_year(matches.assign(match_year=matches["matchdate"].dt.year))
+    with pick_year:
+        year = year_filter(
+            sorted(set(yearly.years_available(standings)) | set(yearly.years_available(matches)), reverse=True),
+            key=f"comp_year_{selected_cat}",
+        )
+    standings = yearly.in_year(standings, year)
+    matches = yearly.in_year(matches, year) if not matches.empty else matches
 
     if standings.empty:
-        st.info(f"No hay posiciones registradas para {selected_cat}.")
+        st.info(f"No hay posiciones registradas para {selected_cat} ({yearly.label(year)}).")
         return
 
     col1, col2, col3, col4 = st.columns(4)
@@ -649,10 +704,10 @@ def page_competition_performance():
         )
         st.metric("Efectividad promedio", f"{avg_ef:.1f}%")
     with col3:
-        st.metric("Goles a favor (totales)", int(standings["goalsfor"].sum()))
+        st.metric(f"Goles a favor ({yearly.label(year)})", int(standings["goalsfor"].sum()))
     with col4:
         st.metric(
-            "Diferencia de gol (total)",
+            f"Diferencia de gol ({yearly.label(year)})",
             f"{int(standings['goaldifference'].sum()):+d}",
         )
 
@@ -749,40 +804,48 @@ def page_player_analysis():
         unsafe_allow_html=True,
     )
 
-    col1, col2 = st.columns([1, 1])
+    import comet_squad
+
+    roster = comet_squad.load_roster(get_squad_by_age_category())
+    pick_category, pick_type, pick_year = st.columns(3)
     categories_df = get_categories_overview()
     all_cats = sorted(
         set(ALL_CATEGORIES_ORDERED)
         | set(categories_df["category"].dropna().astype(str).tolist())
     )
 
-    with col1:
+    with pick_category:
         selected_cat = st.selectbox(
             "Categoría",
             ["Todas"] + all_cats,
             key="player_cat",
         )
-    with col2:
+    with pick_type:
         position_type = st.selectbox(
             "Tipo",
             ["Jugadores de Campo", "Arqueros"],
             key="pos_type",
         )
+    cat_filter = None if selected_cat == "Todas" else selected_cat
 
     if position_type == "Jugadores de Campo":
-        cat_filter = None if selected_cat == "Todas" else selected_cat
-        stats = get_player_stats_by_category(cat_filter)
+        stats_by_year = get_player_stats_by_year(cat_filter)
+        with pick_year:
+            year = year_filter(yearly.years_available(stats_by_year), key=f"analysis_year_{selected_cat}")
+        stats_by_year = comet_squad.exclude_former(stats_by_year, roster, "analysis_include_former")
+        stats = yearly.stats_for_year(stats_by_year, year)
         if stats.empty:
-            st.info("No hay datos disponibles.")
+            st.info(f"No hay datos disponibles ({yearly.label(year)}).")
             return
 
         col1, col2, col3 = st.columns(3)
         with col1:
+            most_matches = int(stats["matches"].max())
             min_matches = st.slider(
                 "Mínimo de partidos jugados",
                 0,
-                int(stats["matches"].max()),
-                5,
+                most_matches,
+                min(5, most_matches),
             )
         with col2:
             nacionalidades = ["Todas"] + sorted(
@@ -817,7 +880,7 @@ def page_player_analysis():
             st.info("Ningún jugador cumple los filtros.")
             return
 
-        st.subheader(f"📊 Jugadores de Campo ({len(filtered)} jugadores)")
+        st.subheader(f"📊 Jugadores de Campo ({len(filtered)} jugadores · {yearly.label(year)})")
 
         display_df = filtered[
             [
@@ -854,6 +917,18 @@ def page_player_analysis():
             hide_index=True,
             use_container_width=True,
         )
+
+        with st.expander("Goles por año de estos jugadores"):
+            by_player = yearly.goals_by_year(stats_by_year, filtered)
+            show_table(by_player, {
+                "displayname": ("Jugador", None),
+                "category": ("Categoría", None),
+                **{col: (col, FMT_INT) for col in yearly.year_columns(by_player)},
+                "Total": ("Total", FMT_INT),
+            })
+            st.caption(
+                "Cada columna es un año de temporada. «—» es un año en que el jugador no tiene partidos en esa categoría."
+            )
 
         st.markdown("---")
         col1, col2 = st.columns(2)
@@ -899,13 +974,16 @@ def page_player_analysis():
                 st.plotly_chart(fig2, use_container_width=True)
 
     else:
-        cat_filter = None if selected_cat == "Todas" else selected_cat
-        gk_stats = get_goalkeeper_stats_by_category(cat_filter)
+        gk_by_year = get_goalkeeper_stats_by_year(cat_filter)
+        with pick_year:
+            year = year_filter(yearly.years_available(gk_by_year), key=f"analysis_year_gk_{selected_cat}")
+        gk_by_year = comet_squad.exclude_former(gk_by_year, roster, "analysis_include_former_gk")
+        gk_stats = yearly.keeper_stats_for_year(gk_by_year, year)
         if gk_stats.empty:
-            st.info("No hay datos de arqueros disponibles.")
+            st.info(f"No hay datos de arqueros disponibles ({yearly.label(year)}).")
             return
 
-        st.subheader(f"🥅 Arqueros ({len(gk_stats)} arqueros)")
+        st.subheader(f"🥅 Arqueros ({len(gk_stats)} arqueros · {yearly.label(year)})")
 
         display_df = gk_stats[
             [
@@ -987,9 +1065,17 @@ def page_squad_structure():
         unsafe_allow_html=True,
     )
 
-    squad = get_squad_by_age_category()
-    if squad.empty:
+    import comet_squad
+
+    roster = comet_squad.load_roster(get_squad_by_age_category())
+    squad = roster.current
+    if roster.classified.empty:
         st.warning("No hay datos del plantel.")
+        return
+    if squad.empty:
+        st.warning("Ningún registro cumple hoy la regla de plantel vigente; la revisión de abajo muestra por qué.")
+        comet_squad.render_notice(roster)
+        comet_squad.render_audit(roster, ALL_CATEGORIES_ORDERED)
         return
 
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -1021,6 +1107,7 @@ def page_squad_structure():
         else:
             st.metric("% Chilenos", "—")
 
+    comet_squad.render_notice(roster)
     st.markdown("---")
     st.subheader("📊 Distribución del plantel")
 
@@ -1140,6 +1227,8 @@ def page_squad_structure():
             hide_index=True,
             use_container_width=True,
         )
-        st.caption(f"Mostrando {len(filtered_squad)} de {len(squad)} jugadores.")
+        st.caption(f"Mostrando {len(filtered_squad)} de {len(squad)} jugadores vigentes.")
     else:
         st.info("No hay columnas suficientes para mostrar el plantel.")
+
+    comet_squad.render_audit(roster, ALL_CATEGORIES_ORDERED)

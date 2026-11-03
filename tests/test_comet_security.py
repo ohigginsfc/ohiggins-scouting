@@ -39,7 +39,7 @@ def modules(monkeypatch):
     return dict(comet_context=comet_context, comet_followup=comet_followup, comet_insights=comet_insights)
 
 
-GUARDED = [('comet_context', name) for name in ('load_raw', 'load_config', 'compute', 'context')] + \
+GUARDED = [('comet_context', name) for name in ('load_raw', 'load_config', 'load_bajas', 'compute', 'context')] + \
           [(module, function) for module, function in NEW_SECTIONS.values()]
 
 
@@ -55,6 +55,20 @@ def test_every_new_entry_point_rejects_scout_and_anonymous(modules, monkeypatch,
     with security.session_scope({}, verified_user=user), pytest.raises(PermissionError):
         call(*args)
     boom.assert_not_called()
+
+
+class Untouchable:
+    """Contexto que falla si alguien lee cualquier dato de él."""
+
+    def __getattr__(self, name):
+        raise AssertionError(f'se leyó «{name}» sin autorización')
+
+
+@pytest.mark.parametrize('user', [SCOUT, None], ids=['scout', 'sin-sesion'])
+def test_match_history_renderer_rejects_scout_and_anonymous_before_reading_anything(modules, user):
+    import comet_matchlog
+    with security.session_scope({}, verified_user=user), pytest.raises(PermissionError):
+        comet_matchlog.render_match_log(Untouchable(), '1', key='cp_log')
 
 
 def test_cached_comet_data_is_not_served_to_scout(modules, monkeypatch):
@@ -79,7 +93,10 @@ def test_config_store_functions_require_admin_before_touching_the_database(monke
     calls = [(config_store.load_all, ()), (config_store.save_setting, ('yellow_threshold', 4)),
              (config_store.set_mark, ('1', 'proyectado', True)),
              (config_store.add_period, ('1', 'mundial', pd.Timestamp('2026-01-01').date(), pd.Timestamp('2026-01-02').date())),
-             (config_store.retire_period, (1,))]
+             (config_store.retire_period, (1,)),
+             (config_store.load_bajas, ()), (config_store.load_roster_config, ()),
+             (config_store.set_bajas, (['1'], 'cedido', pd.Timestamp('2026-01-01').date())),
+             (config_store.reinstate_bajas, (['1'],))]
     for user in (SCOUT, None):
         with security.session_scope({}, verified_user=user):
             for function, args in calls:
@@ -102,6 +119,11 @@ def test_config_store_validation_rejects_bad_input_before_connecting(monkeypatch
             lambda: config_store.set_mark('1', 'proyectado', True, 'x' * 501),
             lambda: config_store.add_period('1', 'olimpiadas', day, day),
             lambda: config_store.add_period('1', 'mundial', day, day - timedelta(days=1)),
+            lambda: config_store.set_bajas(['1; DROP TABLE x'], 'cedido', day),
+            lambda: config_store.set_bajas(['1'], 'despedido', day),
+            lambda: config_store.set_bajas(['1'], 'cedido', day, 'x' * 501),
+            lambda: config_store.set_bajas([], 'cedido', day),
+            lambda: config_store.reinstate_bajas(['1 OR 1=1']),
         ]:
             with pytest.raises(ValueError):
                 call()
@@ -186,10 +208,22 @@ def test_migration_003_stays_in_private_portal_schema_and_grants_nothing_public(
         assert f'portal.{table}' in code
 
 
+def test_migration_005_stays_in_private_portal_schema_and_never_deletes():
+    sql = Path('db/portal/005_comet_player_bajas.sql').read_text(encoding='utf8')
+    code = '\n'.join(line for line in sql.splitlines() if not line.strip().startswith('--'))
+    assert 'public.' not in code and 'comet_reader' not in code and 'scouting_runtime' not in code
+    assert not re.search(r'GRANT[^;]*\b(anon|authenticated|PUBLIC)\b', code.replace('REVOKE ALL', ''), re.I | re.S)
+    assert not re.search(r'GRANT[^;]*\bDELETE\b', code, re.I | re.S), 'una baja se desactiva, no se borra'
+    assert code.count('ENABLE ROW LEVEL SECURITY') == 1 and 'portal.comet_player_bajas' in code
+    assert 'REVOKE ALL ON portal.comet_player_bajas FROM PUBLIC, anon, authenticated' in code
+
+
 def test_new_files_contain_no_connection_strings_or_keys():
     root = Path('.')
     files = list((root / 'src/scouting/comet').glob('*.py')) + [root / 'app/comet_context.py', root / 'app/comet_followup.py',
-            root / 'app/comet_insights.py', root / 'app/ui/comet_widgets.py', root / 'db/portal/003_comet_followup.sql',
+            root / 'app/comet_insights.py', root / 'app/comet_matchlog.py', root / 'app/comet_squad.py',
+            root / 'app/ui/comet_widgets.py',
+            root / 'db/portal/003_comet_followup.sql', root / 'db/portal/005_comet_player_bajas.sql',
             root / 'scripts/comet_demo_data.py', root / 'scripts/comet_demo_store.py', root / 'scripts/demo_comet_followup.py']
     forbidden = re.compile(r'postgres(ql)?://\w+:[^@\s]+@|eyJ[A-Za-z0-9_-]{20,}|sb_secret_|password\s*=\s*[\'"][^\'"]{4,}[\'"]', re.I)
     for path in files:

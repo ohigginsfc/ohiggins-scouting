@@ -43,6 +43,7 @@ def comet_env(monkeypatch, raw):
     monkeypatch.setattr(comet_context, 'load_raw', lambda: raw)
     monkeypatch.setattr(comet_context, 'load_config', lambda: (
         {}, comet_context.EMPTY_MARKS, comet_context.EMPTY_PERIODS, 'Falta aplicar db/portal/003_comet_followup.sql en Supabase.'))
+    monkeypatch.setattr(comet_context, 'load_bajas', lambda: (comet_context.roster.EMPTY_BAJAS, None))
     monkeypatch.setattr(comet_context, 'now', lambda: comet_demo_data.TODAY)
     return comet_context
 
@@ -70,13 +71,43 @@ def test_weekly_match_shows_every_sheet_block(comet_env):
 
 
 def test_pending_rules_are_labelled_as_assumptions_not_approved(comet_env):
-    app = render('Rankings por categoría')
+    app = render('Alertas')
     notes = ' '.join(m.value for m in app.markdown if 'cm-note' in m.value)
     assert 'pendiente de confirmar' in notes
     assert 'aprobada' not in notes.lower()
+
+
+def test_rules_the_club_already_decided_are_not_shown_as_provisional(comet_env):
+    """Fecha de corte, minutos posibles desde la primera citación y sin mínimo de minutos (decididos el 30-10-2026)."""
+    for page in ('Rankings por categoría', 'Indicadores', 'Ficha del jugador'):
+        notes = ' '.join(m.value for m in render(page).markdown if 'cm-note' in m.value)
+        for decided in ('Fecha de corte de edad', 'Minutos posibles: contar desde la primera citación',
+                        'Minutos mínimos para contar el resultado del partido'):
+            assert decided not in notes, (page, decided)
 
 
 def test_tracking_screen_degrades_without_store(comet_env):
     app = render('Seguimiento y configuración')
     assert any('003_comet_followup.sql' in w.value for w in app.warning)
     assert all(b.disabled for b in app.button if b.label.startswith('Guardar'))
+
+
+@pytest.mark.parametrize('page', ['Alertas', 'Seguimiento y configuración'])
+@pytest.mark.parametrize('bajas_error', [
+    'Falta aplicar db/portal/005_comet_player_bajas.sql en Supabase.',
+    'No se pudo conectar con la configuración de Supabase.',
+    None,
+])
+def test_alerts_and_digest_warn_only_when_bajas_could_not_be_read(comet_env, monkeypatch, page, bajas_error):
+    monkeypatch.setattr(comet_env, 'load_bajas', lambda: (comet_env.roster.EMPTY_BAJAS, bajas_error))
+
+    app = render(page)
+
+    assert not app.exception, [e.value for e in app.exception]
+    warnings = [w.value for w in app.warning if 'No se pudieron leer las bajas registradas' in w.value]
+    if bajas_error:
+        assert len(warnings) == 1, 'el aviso debe aparecer una sola vez en la pantalla afectada'
+        assert bajas_error in warnings[0]
+        assert 'Las alertas pueden incluir jugadores dados de baja.' in warnings[0]
+    else:
+        assert not warnings, 'una lectura correcta sin bajas no necesita este aviso'

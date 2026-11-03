@@ -15,7 +15,7 @@ import psycopg
 import pytest
 import streamlit as st
 
-from scouting.comet import alerts as alert_rules, categories, config_store, metrics, queries
+from scouting.comet import alerts as alert_rules, categories, config_store, metrics, queries, roster, yearly
 from scouting.comet.facts import build_dataset
 from scouting.comet.ledger import PostgresLedger
 from scouting.comet.pipeline import compute_all
@@ -263,8 +263,8 @@ def test_new_calculations_agree_with_the_existing_comet_dashboard(comet_conn, mo
     monkeypatch.setattr(dashboard, 'load_data', _loader(conn))
     st.cache_data.clear()
     with security.session_scope({}, verified_user=ADMIN):
-        old_players = dashboard.get_player_stats_by_category(None)
-        old_keepers = dashboard.get_goalkeeper_stats_by_category(None)
+        old_players = yearly.stats_for_year(dashboard.get_player_stats_by_year(None))
+        old_keepers = yearly.keeper_stats_for_year(dashboard.get_goalkeeper_stats_by_year(None))
         old_results = dashboard.get_match_results_by_category(None)
     raw = queries.fetch_raw(_loader(conn))
     ds = build_dataset(raw['sheet'], raw['matches'], raw['players'], raw['goalkeepers'])
@@ -291,6 +291,129 @@ def test_new_calculations_agree_with_the_existing_comet_dashboard(comet_conn, mo
         assert new_by_match.loc[matchid, 'goals_for'] == old_by_match.loc[matchid, 'goals_for']
         assert new_by_match.loc[matchid, 'goals_against'] == old_by_match.loc[matchid, 'goals_against']
         assert new_by_match.loc[matchid, 'venue'] == old_by_match.loc[matchid, 'venue']
+
+
+def _other_seasons(conn):
+    """P1 y el arquero P3 en otras temporadas: una '2025/2026', otra cuyo nombre no trae año (vale el año del partido)."""
+    conn.execute("INSERT INTO competiciones VALUES (300, 'U-15', 'Campeonato U-15 2025', '2025/2026')")
+    conn.execute("INSERT INTO competiciones VALUES (400, 'U-15', 'Copa de invierno', 'Copa de invierno')")
+    conn.execute("INSERT INTO partidos VALUES (300, 300, '2025-11-15 15:00-03', %s, 1)", (CLUB,))
+    conn.execute("INSERT INTO partidos VALUES (400, 400, '2024-07-06 15:00-04', %s, 2)", (CLUB,))
+    conn.execute("INSERT INTO partidos VALUES (999, 1, '2026-03-07 15:00-03', %s, 3)", (CLUB,))   # matchid repetido: no debe duplicar sumas
+    sheet = ('INSERT INTO actuaciones_jugadores (id, matchid, personid, clubid, played, startinglineup, minutesplayed, goals, '
+             'singleyellow, redcards, goalkeeper) VALUES (%s, %s, %s, %s, true, %s, %s, %s, false, 0, false)')
+    conn.execute(sheet, (300, 300, 1, CLUB, True, 70, 2))
+    conn.execute(sheet, (400, 400, 1, CLUB, False, 20, 1))
+    conn.execute('INSERT INTO actuaciones_arqueros VALUES (300, 300, 3, %s, true, 90, 0)', (CLUB,))
+
+
+def test_player_stats_by_year_separate_goals_by_season_and_add_up_to_the_totals(comet_conn, monkeypatch):
+    conn, _ = comet_conn
+    monkeypatch.syspath_prepend(str(Path('app').resolve()))
+    import comet_dashboard as dashboard
+    _other_seasons(conn)
+    monkeypatch.setattr(dashboard, 'load_data', _loader(conn))
+    st.cache_data.clear()
+    with security.session_scope({}, verified_user=ADMIN):
+        by_year = dashboard.get_player_stats_by_year('U-15')
+        everything = dashboard.get_player_stats_by_year(None)
+    assert yearly.years_available(by_year) == [2026, 2025, 2024], 'año de la temporada, "2025/2026" → 2025 y respaldo con el año del partido'
+    p1 = by_year[by_year['personid'] == 1].set_index('season_year')
+    assert p1['goals'].to_dict() == {2024: 1, 2025: 2, 2026: 1} and p1['minutes'].to_dict() == {2024: 20, 2025: 70, 2026: 140}
+    assert p1['matches'].to_dict() == {2024: 1, 2025: 1, 2026: 2}, 'el matchid repetido en otra competición no duplica partidos'
+    assert 'U-14' not in set(by_year['category']) and 'U-14' in set(everything['category'])
+    totals = _loader(conn)(
+        'SELECT a.personid, SUM(a.goals) AS goals, SUM(a.minutesplayed) AS minutes, COUNT(DISTINCT a.matchid) AS matches '
+        'FROM actuaciones_jugadores a JOIN competiciones c ON a.id = c.id '
+        "WHERE a.clubid = %s AND a.played AND NOT a.goalkeeper AND c.category = 'U-15' GROUP BY a.personid", (CLUB,)
+    ).set_index('personid')
+    summed = yearly.stats_for_year(by_year).set_index('personid')
+    assert summed.loc[1, 'goals'] == 4 and summed.loc[1, 'minutes'] == 230 and summed.loc[1, 'matches'] == 4
+    for personid in summed.index:
+        assert summed.loc[personid, ['goals', 'minutes', 'matches']].tolist() == totals.loc[personid, ['goals', 'minutes', 'matches']].tolist()
+    only_2025 = yearly.stats_for_year(by_year, 2025)
+    assert only_2025['personid'].tolist() == [1] and only_2025['goals'].tolist() == [2]
+    table = yearly.goals_by_year(by_year, yearly.stats_for_year(by_year)).set_index('personid')
+    assert table.loc[1, ['2024', '2025', '2026', 'Total']].tolist() == [1, 2, 1, 4]
+    assert table.loc[2, ['2026']].tolist() == [1] and table.loc[2, ['2024', '2025']].isna().all(), 'sin partidos ese año: sin dato, no 0'
+
+
+def test_goalkeeper_stats_by_year_separate_goals_conceded_by_season(comet_conn, monkeypatch):
+    conn, _ = comet_conn
+    monkeypatch.syspath_prepend(str(Path('app').resolve()))
+    import comet_dashboard as dashboard
+    _other_seasons(conn)
+    monkeypatch.setattr(dashboard, 'load_data', _loader(conn))
+    st.cache_data.clear()
+    with security.session_scope({}, verified_user=ADMIN):
+        by_year = dashboard.get_goalkeeper_stats_by_year('U-15')
+    assert yearly.years_available(by_year) == [2026, 2025]
+    keeper = by_year[by_year['personid'] == 3].set_index('season_year')
+    assert keeper['goals_conceded'].to_dict() == {2025: 0, 2026: 4} and keeper['clean_sheets'].to_dict() == {2025: 1, 2026: 0}
+    total = yearly.keeper_stats_for_year(by_year).iloc[0]
+    assert (total.matches, total.minutes, total.goals_conceded, total.clean_sheets) == (3, 250, 4, 1)
+    assert total.gc_per90 == 1.44 and total.clean_sheet_pct == 33.3
+    assert yearly.keeper_stats_for_year(by_year, 2025).iloc[0].clean_sheet_pct == 100.0
+
+
+@pytest.mark.parametrize('session_zone', ['UTC', 'Pacific/Honolulu'])
+@pytest.mark.parametrize('reader_name, metric, expected', [
+    ('get_player_stats_by_year', 'goals', {2025: 2, 2026: 3}),
+    ('get_goalkeeper_stats_by_year', 'goals_conceded', {2025: 1, 2026: 2}),
+])
+def test_yearless_season_uses_santiago_year_at_new_year_in_real_sql(
+    comet_conn, monkeypatch, session_zone, reader_name, metric, expected,
+):
+    """El año de respaldo y la agrupación SQL usan Santiago, independientemente de la zona de la conexión."""
+    conn, _ = comet_conn
+    conn.execute("SELECT set_config('TimeZone', %s, true)", (session_zone,))
+    conn.execute("INSERT INTO competiciones (id, category, name, season) "
+                 "VALUES (800, 'U-15', 'Copa sin año', 'Copa sin año')")
+    for matchid, instant, goals, conceded, minutes in [
+        (800, '2026-01-01 01:00:00+00', 2, 1, 40),  # 31 de diciembre de 2025 en Santiago
+        (801, '2026-01-01 04:00:00+00', 3, 2, 50),  # 1 de enero de 2026 en Santiago
+    ]:
+        conn.execute('INSERT INTO partidos (id, matchid, matchdate, hometeam, awayteam) '
+                     'VALUES (800, %s, %s, %s, 1)', (matchid, instant, CLUB))
+        conn.execute('INSERT INTO actuaciones_jugadores '
+                     '(id, matchid, personid, clubid, played, startinglineup, minutesplayed, goals, '
+                     'singleyellow, redcards, goalkeeper) '
+                     'VALUES (800, %s, 1, %s, true, true, %s, %s, false, 0, false)',
+                     (matchid, CLUB, minutes, goals))
+        conn.execute('INSERT INTO actuaciones_arqueros '
+                     '(id, matchid, personid, clubid, played, minutesplayed, goalsconceded) '
+                     'VALUES (800, %s, 3, %s, true, %s, %s)', (matchid, CLUB, minutes, conceded))
+    raw = queries.fetch_raw(_loader(conn))
+    ds = build_dataset(raw['sheet'], raw['matches'], raw['players'], raw['goalkeepers'])
+    history = ds.matches[ds.matches['competition_id'] == '800'].set_index('matchid')
+    assert history['season_year'].to_dict() == {'800': 2025, '801': 2026}
+
+    monkeypatch.syspath_prepend(str(Path('app').resolve()))
+    import comet_dashboard as dashboard
+    monkeypatch.setattr(dashboard, 'load_data', _loader(conn))
+    st.cache_data.clear()
+    with security.session_scope({}, verified_user=ADMIN):
+        rows = getattr(dashboard, reader_name)('U-15')
+    rows = rows[rows['season'] == 'Copa sin año'].set_index('season_year')
+    assert rows[metric].to_dict() == expected, 'el SELECT y el GROUP BY deben separar los dos años de Santiago'
+    assert rows['matches'].to_dict() == {2025: 1, 2026: 1}
+    assert rows['minutes'].to_dict() == {2025: 40, 2026: 50}
+
+
+def test_match_results_carry_the_season_so_team_goals_can_be_filtered_by_year(comet_conn, monkeypatch):
+    conn, _ = comet_conn
+    monkeypatch.syspath_prepend(str(Path('app').resolve()))
+    import comet_dashboard as dashboard
+    _other_seasons(conn)
+    conn.execute("INSERT INTO partidos_fases VALUES (300, 'Segundo tiempo', 3, 0)")
+    monkeypatch.setattr(dashboard, 'load_data', _loader(conn))
+    st.cache_data.clear()
+    with security.session_scope({}, verified_user=ADMIN):
+        results = dashboard.get_match_results_by_category('U-15')
+    results = yearly.with_season_year(results.assign(match_year=results['matchdate'].dt.year))
+    assert {'season', 'season_year'} <= set(results.columns)
+    assert results.set_index('matchid')['season_year'].to_dict()[300] == 2025
+    assert yearly.years_available(results) == [2026, 2025, 2024], 'la copa sin año en el nombre usa el año del partido'
 
 
 def test_old_squad_screen_uses_the_club_sections_with_the_same_rule_as_the_calculation(comet_conn, monkeypatch):
@@ -634,3 +757,225 @@ def test_store_reports_missing_migration_without_leaking_details(portal_db):
             config_store.load_all()
         with pytest.raises(config_store.StoreUnavailable):
             config_store.set_mark('1', 'proyectado', True)
+
+
+# --- Plantel vigente y bajas (migración 005) ----------------------------------------------------------------------
+
+def _apply_005(dsn):
+    with psycopg.connect(dsn, autocommit=True) as db:
+        db.execute(Path('db/portal/005_comet_player_bajas.sql').read_text(encoding='utf8'))
+
+
+def _squad_noise(conn):
+    """Casos que la regla del plantel debe tratar bien: arquero solo en `actuaciones_arqueros`, partido futuro, rival, inactivo."""
+    insert = ("INSERT INTO jugadores (personid, displayname, dateofbirth, nationality, level, status, orgname) "
+              "VALUES (%s, %s, '2009-05-05', 'Chile', 'F', %s, %s)")
+    for personid, name, status, org in [(7001, 'Arquero solo hoja de arqueros', 'ACTIVO', "O'Higgins"),
+                                        (7002, 'Solo un partido futuro', 'ACTIVO', "O'Higgins"),
+                                        (7003, 'Figura en planilla rival', 'ACTIVO', "O'Higgins"),
+                                        (7004, 'Inactivo en COMET', 'INACTIVO', "O'Higgins"),
+                                        (7005, 'Nunca en una planilla', 'ACTIVO', "O'Higgins")]:
+        conn.execute(insert, (personid, name, status, org))
+    sheet = ('INSERT INTO actuaciones_jugadores (id, matchid, personid, clubid, played, startinglineup, minutesplayed, goals, '
+             'singleyellow, redcards, goalkeeper) VALUES (100, %s, %s, %s, true, true, 80, 0, false, 0, false)')
+    conn.execute(sheet, (90, 7002, CLUB))      # el partido 90 es futuro
+    conn.execute(sheet, (1, 7003, 1))          # planilla del rival en un partido contra O'Higgins
+    conn.execute(sheet, (2, 7004, CLUB))
+    conn.execute('INSERT INTO actuaciones_arqueros VALUES (100, 2, 7001, %s, true, 80, 1)', (CLUB,))
+
+
+def test_squad_query_gives_the_last_sheet_of_players_and_keepers_and_ignores_future_and_rival_sheets(comet_conn, monkeypatch):
+    conn, _ = comet_conn
+    monkeypatch.syspath_prepend(str(Path('app').resolve()))
+    import comet_dashboard as dashboard
+    _squad_noise(conn)
+    squad = _loader(conn)(dashboard.squad_sql(frozenset({('jugadores', 'datefrom')}))).set_index('personid')
+    assert sorted(squad.index) == [1, 2, 3, 4, 5, 7001, 7002, 7003, 7005], 'solo ACTIVO y de O\'Higgins; el inactivo no entra'
+    santiago = lambda text: pd.Timestamp(text, tz='America/Santiago')  # noqa: E731
+    assert squad.loc[1, 'last_match'] == santiago('2026-03-21 15:00'), 'figurar en la planilla basta: no hace falta haber jugado'
+    assert squad.loc[3, 'last_match'] == santiago('2026-03-21 15:00') and squad.loc[5, 'last_match'] == santiago('2026-03-08 11:00')
+    assert squad.loc[7001, 'last_match'] == santiago('2026-03-14 15:00'), 'un arquero que solo figura en la hoja de arqueros cuenta'
+    for ghost in (7002, 7003, 7005):
+        assert pd.isna(squad.loc[ghost, 'last_match']), ghost
+    assert squad.loc[1, 'datefrom'] == pd.Timestamp('2019-03-01', tz='UTC') and pd.isna(squad.loc[2, 'datefrom'])
+    without_datefrom = _loader(conn)(dashboard.squad_sql()).set_index('personid')
+    assert without_datefrom['datefrom'].isna().all() and without_datefrom.loc[1, 'last_match'] == santiago('2026-03-21 15:00')
+
+
+def _check_roster_rule(conn, columns, monkeypatch):
+    """La regla del plantel sobre lo que PostgreSQL entrega de verdad (fechas con zona horaria, NULL, columnas que faltan)."""
+    monkeypatch.syspath_prepend(str(Path('app').resolve()))
+    import comet_dashboard as dashboard
+    today = comet_tiny.TODAY      # 30-09-2026
+    _squad_noise(conn)
+    squad = _loader(conn)(dashboard.squad_sql(columns))
+    done = roster.classify(squad, today, 200)
+    states = dict(zip(done['personid'], done['state']))
+    # 200 días antes del 30-09 es el 14-03: la planilla del 14-03 entra justo en el borde, la del 21-03 (193 días) también,
+    # y la del 08-03 (206 días) queda fuera.
+    assert {pid for pid, state in states.items() if state == roster.STATE_CURRENT} == {'1', '2', '3', '4', '7001'}
+    assert states['5'] == roster.STATE_INACTIVE and states['7002'] == roster.STATE_INACTIVE
+    assert dict(zip(done['personid'], done['reason']))['7005'] == 'Nunca figuró en una planilla de O’Higgins'
+    wide = roster.classify(squad, today, 365)
+    assert set(roster.current(wide)['personid']) == {'1', '2', '3', '4', '5', '7001'}
+    return dashboard, today
+
+
+def test_roster_rule_runs_on_the_types_postgres_returns(comet_conn, monkeypatch):
+    conn, _ = comet_conn
+    columns = frozenset({('jugadores', 'datefrom')})
+    dashboard, today = _check_roster_rule(conn, columns, monkeypatch)
+    # Un `datefrom` reciente (alta sin partidos) mantiene vigente al jugador.
+    conn.execute("UPDATE jugadores SET datefrom = '2026-08-01 00:00:00+00' WHERE personid = 7005")
+    fresh = roster.classify(_loader(conn)(dashboard.squad_sql(columns)), today, 200)
+    assert dict(zip(fresh['personid'], fresh['state']))['7005'] == roster.STATE_CURRENT
+    assert dict(zip(fresh['personid'], fresh['reason']))['7005'] == 'Alta reciente: datefrom 01-08-2026, todavía sin planilla'
+
+
+def test_roster_rule_runs_when_comet_has_no_datefrom_column(comet_conn_base, monkeypatch):
+    conn, _ = comet_conn_base
+    _check_roster_rule(conn, frozenset(), monkeypatch)
+
+
+@pytest.mark.parametrize('page', ['page_executive_summary', 'page_youth_development', 'page_squad_structure', 'page_player_analysis'])
+def test_squad_screens_render_with_the_types_postgres_really_returns(comet_conn, monkeypatch, page):
+    from streamlit.testing.v1 import AppTest
+    conn, _ = comet_conn
+    _squad_noise(conn)
+    monkeypatch.syspath_prepend(str(Path('app').resolve()))
+    for key, value in [('PORTAL_MODE', '1'), ('DB_SCHEMA', 'scouting'), ('DISABLE_SOFASCORE_UPDATE', '1')]:
+        monkeypatch.setenv(key, value)
+    import comet_context
+    import comet_dashboard
+    st.cache_data.clear()
+    monkeypatch.setattr(comet_dashboard, 'load_data', _loader(conn))
+    monkeypatch.setattr(comet_context, 'now', lambda: comet_tiny.TODAY)
+    monkeypatch.setattr(config_store, 'load_roster_config', lambda: ({}, roster.EMPTY_BAJAS, None))
+    script = (f'import comet_dashboard\nfrom scouting.portal import security\n'
+              f'with security.session_scope({{}}, verified_user={ADMIN!r}):\n    comet_dashboard.{page}()\n')
+    app = AppTest.from_string(script, default_timeout=120).run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert not app.error, [e.value for e in app.error]
+    if page == 'page_squad_structure':
+        assert [m.value for m in app.metric if m.label == 'Total jugadores'] == ['6'], '9 activos en COMET, 3 sin planilla reciente'
+
+
+def test_migration_005_is_idempotent_private_and_without_delete(portal_db):
+    _apply_005(portal_db)
+    _apply_005(portal_db)  # se puede volver a aplicar
+    with psycopg.connect(portal_db, autocommit=True) as db:
+        assert db.execute("SELECT relrowsecurity FROM pg_class WHERE oid = 'portal.comet_player_bajas'::regclass").fetchone()[0]
+        grants = db.execute("SELECT grantee, privilege_type FROM information_schema.role_table_grants "
+                            "WHERE table_schema='portal' AND table_name='comet_player_bajas'").fetchall()
+        owner = db.execute("SELECT tableowner FROM pg_tables WHERE schemaname='portal' AND tablename='comet_player_bajas'").fetchone()[0]
+        assert {g for g, _ in grants} <= {'portal_runtime', owner}, f'permisos inesperados {grants}'
+        assert {p for g, p in grants if g == 'portal_runtime'} == {'SELECT', 'INSERT', 'UPDATE'}, 'una baja se desactiva, no se borra'
+        assert db.execute("SELECT count(*) FROM pg_policies WHERE tablename = 'comet_player_bajas'").fetchone()[0] == 1
+        for role in ('authenticated', 'anon'):
+            db.execute(f'SET ROLE {role}')
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                db.execute('SELECT * FROM portal.comet_player_bajas')
+            db.execute('RESET ROLE')
+
+
+def test_bajas_table_constraints_hold_for_the_runtime_role(portal_db):
+    _apply_005(portal_db)
+    admin_id = accounts.bootstrap_admin('admin@example.test', 'Admin', 'synthetic-password-123')
+    insert = ('INSERT INTO portal.comet_player_bajas(personid, reason, effective_on, note, created_by, updated_by) '
+              'VALUES (%s, %s, %s, %s, %s, %s)')
+    day = date(2026, 10, 1)
+    with psycopg.connect(portal_db, autocommit=True) as db:
+        db.execute('SET ROLE portal_runtime')
+        db.execute(insert, ('15', 'cedido', day, '', admin_id, admin_id))
+        assert db.execute("SELECT active FROM portal.comet_player_bajas WHERE personid = '15'").fetchone()[0] is True, 'nace vigente'
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            db.execute(insert, ('15', 'otro', day, '', admin_id, admin_id))
+        for personid, reason, note in [('', 'cedido', ''), ('x' * 41, 'cedido', ''), ('16', 'despedido', ''), ('17', 'cedido', 'x' * 501)]:
+            with pytest.raises(psycopg.errors.CheckViolation):
+                db.execute(insert, (personid, reason, day, note, admin_id, admin_id))
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            db.execute(insert, ('18', 'cedido', day, '', str(uuid4()), str(uuid4())))
+        with pytest.raises(psycopg.errors.NotNullViolation):
+            db.execute(insert, ('19', 'cedido', None, '', admin_id, admin_id))
+        db.execute("UPDATE portal.comet_player_bajas SET active = false WHERE personid = '15'")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            db.execute('DELETE FROM portal.comet_player_bajas')
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            db.execute('TRUNCATE portal.comet_player_bajas')
+
+
+def test_bajas_store_end_to_end_with_real_database(portal_db):
+    _apply_003(portal_db)
+    _apply_005(portal_db)
+    admin_id = accounts.bootstrap_admin('admin@example.test', 'Admin', 'synthetic-password-123')
+    admin = accounts.get_user(admin_id)
+    day = date(2026, 10, 1)
+    with security.session_scope({}, verified_user=admin):
+        assert config_store.load_bajas().empty
+        assert config_store.set_bajas(['201', '202', '201'], 'cedido', day, '  Préstamo a Club Ficticio ') == 2, 'un repetido cuenta una vez'
+        frame = config_store.load_bajas().set_index('personid')
+        assert set(frame.index) == {'201', '202'} and frame['active'].all() and set(frame['reason']) == {'cedido'}
+        assert set(frame['note']) == {'Préstamo a Club Ficticio'} and set(frame['effective_on']) == {day}
+        assert list(config_store.load_bajas().columns) == roster.BAJA_COLUMNS
+        # Registrar otra vez actualiza la misma fila (no duplica) y deja constancia del cambio.
+        assert config_store.set_bajas(['201'], 'dejo_club', date(2026, 10, 5), 'Dejó el club') == 1
+        frame = config_store.load_bajas().set_index('personid')
+        assert len(frame) == 2 and frame.loc['201', 'reason'] == 'dejo_club' and frame.loc['201', 'effective_on'] == date(2026, 10, 5)
+        # Reincorporar desactiva (la fila queda) y cuenta solo lo que cambió de verdad.
+        assert config_store.reinstate_bajas(['201', '999']) == 1
+        assert config_store.reinstate_bajas(['201']) == 0, 'ya estaba reincorporado'
+        frame = config_store.load_bajas().set_index('personid')
+        assert not frame.loc['201', 'active'] and frame.loc['202', 'active'] and len(frame) == 2
+        assert roster.active_baja_ids(frame.reset_index()) == frozenset({'202'})
+        config_store.set_bajas(['201'], 'transferido', day)      # volver a dar de baja la reactiva
+        assert config_store.load_bajas().set_index('personid').loc['201', 'active']
+        with pytest.raises(ValueError):
+            config_store.set_bajas(['203'], 'cedido', date.today() + timedelta(days=30))
+    with psycopg.connect(portal_db) as db:
+        assert db.execute('SELECT DISTINCT updated_by::text, created_by::text FROM portal.comet_player_bajas').fetchall() == \
+            [(admin_id, admin_id)], 'queda registrado quién hizo cada cambio'
+        assert db.execute('SELECT count(*) FROM portal.comet_player_bajas').fetchone()[0] == 2
+
+
+def test_roster_config_still_works_without_005_and_the_store_names_the_missing_migration(portal_db):
+    admin = accounts.get_user(accounts.bootstrap_admin('admin@example.test', 'Admin', 'synthetic-password-123'))
+    with security.session_scope({}, verified_user=admin):
+        with pytest.raises(config_store.StoreUnavailable, match='003_comet_followup.sql'):
+            config_store.load_roster_config()
+        _apply_003(portal_db)
+        config_store.save_setting('squad_activity_days', 120, confirmed=True)
+        settings, bajas, error = config_store.load_roster_config()
+        assert settings['squad_activity_days'] == {'value': 120, 'confirmed': True}, 'la regla se lee aunque falte la 005'
+        assert bajas.empty and '005_comet_player_bajas.sql' in error and 'relation' not in error
+        for call in (config_store.load_bajas, config_store.load_bajas_for_job,
+                     lambda: config_store.set_bajas(['1'], 'cedido', date(2026, 10, 1)),
+                     lambda: config_store.reinstate_bajas(['1'])):
+            with pytest.raises(config_store.StoreUnavailable, match='005_comet_player_bajas.sql'):
+                call()
+        _apply_005(portal_db)
+        config_store.set_bajas(['5'], 'otro', date(2026, 10, 1), 'nota')
+        settings, bajas, error = config_store.load_roster_config()
+        assert error is None and list(bajas['personid']) == ['5'] and settings['squad_activity_days']['value'] == 120
+        assert Rules({k: v for k, v in settings.items() if k != config_store.ALERT_CONFIG_KEY}).value('squad_activity_days') == 120
+
+
+def test_weekly_digest_job_reads_bajas_from_the_real_store_and_leaves_them_out_of_the_alerts(portal_db):
+    from scripts import send_comet_weekly_digest as job
+    _apply_003(portal_db)
+    _apply_005(portal_db)
+    admin = accounts.get_user(accounts.bootstrap_admin('admin@example.test', 'Admin', 'synthetic-password-123'))
+    env = {'PORTAL_AUTH_DATABASE_URL': portal_db}
+
+    def alerts():
+        lines = []
+        assert job.run(['--week-of', '2026-03-09'], env=env, load_raw=lambda: comet_tiny.build(), now='2026-03-30',
+                       out=lines.append) == 0
+        text = '\n'.join(lines)
+        return text, text.split('ALERTAS VIGENTES')[1].split('NOTAS')[0]
+    with security.session_scope({}, verified_user=admin):
+        config_store.save_setting('yellow_threshold', 1, confirmed=True)
+        assert 'Jugador Uno' in alerts()[1]
+        config_store.set_bajas(['1'], 'dejo_club', date(2026, 3, 25))
+    whole, section = alerts()
+    assert 'Jugador Uno' not in section and 'Jugador Dos' in section and 'Aviso' not in whole
+    assert job.load_bajas(env)[1] is None and list(job.load_bajas(env)[0]['personid']) == ['1']

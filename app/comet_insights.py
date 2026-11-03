@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 
+import comet_matchlog
 from comet_context import Context, context, season_choices
 from scouting.comet import adelantados, alerts as alert_rules, config_store, indicators, quality
 from scouting.comet.dependencies import PIPELINE_DEPENDENCIES
@@ -184,18 +185,29 @@ def marked_players(ctx: Context) -> dict:
     return grouped.to_dict()
 
 
+def _bajas_warning(ctx: Context) -> None:
+    if ctx.bajas_error:
+        st.warning(f'No se pudieron leer las bajas registradas ({ctx.bajas_error}). '
+                   'Las alertas pueden incluir jugadores dados de baja.')
+
+
 @admin_only
 def page_alerts() -> None:
     inject_styles()
     title('Alertas automáticas', 'Jugadores que requieren atención deportiva. Los umbrales y colores se configuran en Seguimiento.')
     ctx = context()
+    _bajas_warning(ctx)
     ds = ctx.ds
     if ds.facts.empty:
         st.info('COMET no tiene planillas de O’Higgins.')
         return
     rule_note(ctx.rules, ['card_cycle', 'possible_from_first_call', 'exclude_selection_periods', 'age_cutoff', 'promotion_rule'])
     season = _season_picker(ctx, 'ca_season')
-    found = alert_rules.evaluate_alerts(ds, ctx.computed.cat, season, ctx.alert_config)
+    excluded = ctx.alert_exclusions(season)
+    found = alert_rules.evaluate_alerts(ds, ctx.computed.cat, season, ctx.alert_config, exclude=excluded)
+    if excluded:
+        st.caption(f'{len(excluded)} jugador(es) con baja registrada no aparecen en las alertas de la temporada en curso '
+                   '(se reincorporan en Estructura del plantel).')
     tiles = st.columns(len(alert_rules.ALERT_DEFS))
     for tile, definition in zip(tiles, alert_rules.ALERT_DEFS):
         config = ctx.alert_config[definition.key]
@@ -268,7 +280,8 @@ def page_adelantados() -> None:
     k[1].metric('Minutos en categoría superior', fmt(ahead_minutes))
     k[2].metric('% de los minutos de todas las series', fmt(ahead_minutes / total_minutes * 100 if pd.notna(total_minutes) and total_minutes else None, 1, ' %'))
     k[3].metric('Categorías con adelantados', int((share['adelantados'] > 0).sum()))
-    tabs = st.tabs(['Jugadores', 'Por categoría', 'Permanencia en el año', 'Comparación con su grupo de edad'])
+    tabs = st.tabs(['Jugadores', 'Por categoría', 'Permanencia en el año', 'Comparación con su grupo de edad',
+                    'Historial completo'])
 
     with tabs[0]:
         if players.empty:
@@ -319,6 +332,16 @@ def page_adelantados() -> None:
             st.caption('“Adelantados” son los jugadores de esa edad con minutos en una categoría superior (sus cifras allí); '
                        '“Grupo de edad” son los que juegan en la categoría que les corresponde. Con pocos jugadores la '
                        'comparación es solo orientativa: mira la columna Jugadores.')
+    with tabs[4]:
+        if players.empty:
+            st.info('Nadie juega por encima de su edad en esa temporada.')
+        else:
+            labels = {row.personid: f'{_label(row.displayname)} · juega en {row.plays_in} (le corresponde {row.age_category})'
+                      for row in players.itertuples()}
+            chosen = st.selectbox('Jugador adelantado', list(labels), format_func=labels.__getitem__, key='cd_log_player')
+            comet_matchlog.render_match_log(ctx, chosen, key='cd_log', oldest_first=True)
+            st.caption('Es el historial de todas las temporadas, no solo de la elegida arriba. Para un jugador que no aparece '
+                       'en esta lista, usa la pantalla «Ficha del jugador», pestaña Partidos.')
 
 
 def _rule_widget(ctx: Context, rule, disabled: bool):
@@ -381,6 +404,8 @@ def _tab_rules(ctx: Context) -> None:
         for rule in shown:
             st.markdown(f'{status_pill(ctx.rules.status(rule.key))} **{escape(rule.label)}**', unsafe_allow_html=True)
             st.caption(rule.applied)
+            if rule.decision and ctx.rules.value(rule.key) == rule.default:
+                st.caption(f'Decisión registrada: {rule.decision}')
             values[rule.key] = _rule_widget(ctx, rule, disabled)
             if rule.origin != ORIGIN_PABLO:
                 confirms[rule.key] = st.checkbox('Confirmada por Pablo / el club', value=ctx.rules.confirmed(rule.key),
@@ -456,6 +481,7 @@ def _tab_marks(ctx: Context) -> None:
 
 
 def _tab_digest(ctx: Context) -> None:
+    _bajas_warning(ctx)
     ds = ctx.ds
     recipients = ctx.rules.value('digest_recipients')
     default_start = pd.Timestamp(previous_week(ctx.today)[0])
@@ -463,8 +489,8 @@ def _tab_digest(ctx: Context) -> None:
     week = st.selectbox('Semana a resumir', weeks, index=weeks.index(default_start), key='cs_week',
                         format_func=lambda w: f'{w:%d-%m-%Y} al {w + timedelta(days=6):%d-%m-%Y}')
     season = ds.current_season(week + timedelta(days=6)) or (ds.seasons[-1] if ds.seasons else None)
-    found = alert_rules.evaluate_alerts(ds, ctx.computed.cat, season, ctx.alert_config) if season else pd.DataFrame(
-        columns=['alert_key'])
+    found = alert_rules.evaluate_alerts(ds, ctx.computed.cat, season, ctx.alert_config,
+                                        exclude=ctx.alert_exclusions(season)) if season else pd.DataFrame(columns=['alert_key'])
     digest = build_weekly_digest(ds, found, week.date(), generated_on=ctx.today.date(), pending_rules=len(ctx.rules.pending()),
                                  blocked=len(ds.blocked_players(season)) if season else 0,
                                  no_minutes=len(ds.minutes_gap_players(season)) if season else 0)

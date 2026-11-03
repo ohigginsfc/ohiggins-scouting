@@ -124,9 +124,15 @@ def test_cycle_and_roster_decisions_are_recorded_and_open_questions_stay_open():
     assert rules.value('card_cycle') == 'mixto' and rules.status('card_cycle') == STATUS_CONFIRMED
     assert 'Reunión con Pablo, 13-10-2026' in RULES_BY_KEY['card_cycle'].decision
     assert rules.status('roster_rule') == STATUS_CONFIRMED and rules.value('roster_rule') == 'planillas'
-    # Lo que Pablo no contestó sigue pendiente, con su pregunta.
-    for key in ('second_yellow_rule', 'suspensions_rule', 'age_cutoff', 'possible_from_first_call', 'duration_source',
-                'seniority_rule', 'promotion_rule', 'digest_recipients', 'min_minutes_on_pitch'):
+    # Lo que el equipo comunicó el 30-10-2026 también queda confirmado, con constancia de quién y cuándo.
+    assert (rules.value('age_cutoff'), rules.value('possible_from_first_call'), rules.value('min_minutes_on_pitch')) == \
+        ('12-31', True, 0)
+    for key in ('age_cutoff', 'possible_from_first_call', 'min_minutes_on_pitch'):
+        assert rules.status(key) == STATUS_CONFIRMED, key
+        assert '30-10-2026' in RULES_BY_KEY[key].decision and 'equipo del proyecto' in RULES_BY_KEY[key].decision, key
+    # Lo que nadie ha contestado sigue pendiente, con su pregunta.
+    for key in ('second_yellow_rule', 'suspensions_rule', 'duration_source', 'seniority_rule', 'promotion_rule',
+                'digest_recipients'):
         assert rules.status(key) == STATUS_PENDING and RULES_BY_KEY[key].question, key
 
 
