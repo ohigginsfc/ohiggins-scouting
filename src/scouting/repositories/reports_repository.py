@@ -190,8 +190,11 @@ def delete_duplicate_reports_same_key(
         return int(deleted)
 
 
-def update_report_fields(conn: Connection, report_id: int, **fields: Any) -> None:
-    """Update only explicitly supplied fields, preserving metadata and ownership."""
+def update_report_fields(conn: Connection, report_id: int, *, commit: bool = True, **fields: Any) -> None:
+    """Update only explicitly supplied fields, preserving metadata and ownership.
+
+    Con `commit=False` la transacción queda abierta para que quien llama la cierre junto con otras escrituras.
+    """
     allowed = {
         'source_type', 'source_name', 'scout_name', 'report_date', 'competition',
         'match_observed', 'position_observed', 'minutes_observed', 'summary',
@@ -210,7 +213,8 @@ def update_report_fields(conn: Connection, report_id: int, **fields: Any) -> Non
     with conn.cursor() as cur:
         cur.execute(sql.SQL('UPDATE scouting_reports SET {} WHERE id = %s').format(assignments),
                     (*values, report_id))
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def update_report(
@@ -393,6 +397,28 @@ def get_hidden_reports(conn: Connection, limit: int = 100) -> list[dict[str, Any
             LIMIT %s
             """,
             (limit,),
+        )
+        return list(cur.fetchall())
+
+
+def get_hidden_reports_by_position(conn: Connection, position: str | None, limit: int = 200) -> list[dict[str, Any]]:
+    """Informes ocultos de los jugadores con esa posición en su ficha (`None`: los jugadores sin posición)."""
+    if position is None:
+        position_clause, params = "(p.position IS NULL OR trim(p.position) = '')", (limit,)
+    else:
+        position_clause, params = "p.position = %s", (position, limit)
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            f"""
+            SELECT {_REPORT_LIST_COLS}
+            FROM scouting_reports sr
+            JOIN players p ON p.id = sr.player_id
+            WHERE COALESCE(sr.is_hidden, FALSE) = TRUE
+              AND {position_clause}
+            ORDER BY sr.hidden_at DESC NULLS LAST, sr.created_at DESC
+            LIMIT %s
+            """,
+            params,
         )
         return list(cur.fetchall())
 

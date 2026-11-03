@@ -37,6 +37,13 @@ def fetch_hidden_reports(conn: Connection, limit: int = 100) -> list[dict[str, A
     return reports_repository.get_hidden_reports(conn, limit=limit)
 
 
+def fetch_hidden_reports_by_position(conn: Connection, position: str | None, limit: int = 200) -> list[dict[str, Any]]:
+    """Informes ocultos de una posición del campograma (`None`: jugadores sin posición en su ficha)."""
+    if os.environ.get('PORTAL_MODE') == '1':
+        require_user()
+    return reports_repository.get_hidden_reports_by_position(conn, position, limit=limit)
+
+
 def get_report(conn: Connection, report_id: int) -> dict[str, Any] | None:
     return reports_repository.get_report_by_id(conn, report_id)
 
@@ -107,6 +114,56 @@ def update_report(conn: Connection, report_id: int, **fields: Any) -> None:
     if os.environ.get('PORTAL_MODE') == '1' and 'raw_payload' in fields:
         raise ValueError('No se puede cambiar la propiedad del informe.')
     reports_repository.update_report_fields(conn, report_id, **fields)
+
+
+GENERAL_RATING_MIN = Decimal("0")
+GENERAL_RATING_MAX = Decimal("10")
+
+
+def update_report_position_and_rating(
+    conn: Connection,
+    report_id: int,
+    *,
+    position_observed: str | None,
+    rating: Decimal | float | int | str | None,
+    player_position: str | None = None,
+) -> None:
+    """Corrige en el momento la posición observada y la valoración general de un informe.
+
+    * `rating=None` deja el informe **sin valoración**: no se guarda un 0 ni un valor por defecto.
+    * `player_position` completa la posición de la ficha del jugador solo si hoy no tiene ninguna (el campograma y las
+      tablas del dashboard usan esa posición); nunca pisa una posición que ya existe.
+    Todo se valida antes de escribir y las dos escrituras (informe y ficha) van en una sola transacción: o se guardan
+    las dos o no se guarda ninguna.
+    """
+    from scouting.services.templates_service import get_available_positions
+
+    if os.environ.get('PORTAL_MODE') == '1':
+        report = require_report_owner(conn, report_id)
+    else:
+        report = reports_repository.get_report_by_id(conn, report_id)
+    if not report:
+        raise ValueError("Informe no encontrado.")
+
+    value: Decimal | None = None
+    if rating is not None:
+        value = _to_decimal(rating)
+        if value is None or value.is_nan() or not GENERAL_RATING_MIN <= value <= GENERAL_RATING_MAX:
+            raise ValueError("La valoración general debe estar entre 0 y 10.")
+    chosen = _optional_str(player_position)
+    if chosen is not None and chosen not in get_available_positions():
+        raise ValueError(f"Posición no válida: {chosen!r}")
+
+    try:
+        reports_repository.update_report_fields(
+            conn, report_id, position_observed=_optional_str(position_observed), rating=value, commit=False
+        )
+        if chosen is not None:
+            players_repository.set_player_position_if_missing(conn, int(report["player_id"]), chosen, commit=False)
+    except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
 
 
 def _to_date(value: Any) -> date | None:

@@ -87,6 +87,7 @@ class ManualReportResetTests(unittest.TestCase):
         self.assertEqual(state["mr_scout_name"], "")
         self.assertEqual(state["mr_minutes"], 0)
         self.assertEqual(state["mr_rating_scout"], 6.0)
+        self.assertIs(state["mr_rate_report"], False, "tras guardar, la valoración vuelve a ser opcional")
         self.assertEqual(state["mr_strengths"], "")
         self.assertEqual(state["mr_recommendation"], "Observar")
         self.assertEqual(state["mr_report_date"], date.today())
@@ -148,6 +149,7 @@ class ManualReportResetTests(unittest.TestCase):
             "mr_match_observed",
             "mr_position_observed",
             "mr_minutes",
+            "mr_rate_report",
             "mr_rating_scout",
             "mr_strengths",
             "mr_weaknesses",

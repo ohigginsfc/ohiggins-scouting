@@ -166,6 +166,43 @@ def humanize_source_type(value: Any) -> str | None:
     return _SOURCE_LABELS.get(raw, None)
 
 
+_NO_VALUE_TEXTS = frozenset({"", "none", "nan", "null", "nat", "-", "—"})
+
+
+def _text_or_none(value: Any) -> str | None:
+    """Texto limpio, o None si falta (incluidos los «None» / «nan» que deja una conversión a texto)."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return None if text.lower() in _NO_VALUE_TEXTS else text
+
+
+def report_position_for_ui(report: dict[str, Any]) -> str:
+    """Posición de un informe en las tablas.
+
+    Primero la de la ficha del jugador (`player_position`); si no la tiene, la que el scout observó en ese
+    informe (`position_observed`); si no hay ninguna, «—». Nunca se muestra «None» ni se inventa una posición.
+    """
+    for key in ("player_position", "position_observed"):
+        text = _text_or_none(report.get(key))
+        if text:
+            return text
+    return "—"
+
+
+def format_rating_for_ui(value: Any) -> str:
+    """Valoración general del informe sin decimales de sobra (6.5, no 6.500000); sin dato, «—» (nunca un 0 ni un 6)."""
+    if value is None:
+        return "—"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    if number != number:  # NaN
+        return "—"
+    return f"{number:g}"
+
+
 def render_report_metadata(
     report: dict[str, Any],
     *,

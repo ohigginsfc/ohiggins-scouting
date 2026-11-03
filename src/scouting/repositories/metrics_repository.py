@@ -755,6 +755,66 @@ def get_objective_data_filter_options(
     return out
 
 
+@cached_objective_read
+def get_player_team_history(conn: Connection, player_id: int) -> list[dict[str, Any]]:
+    """Equipo de un jugador en cada temporada y competición según sus datos objetivos reales (Sofascore).
+
+    Del más reciente al más antiguo; a igualdad de temporada va primero el bloque con más métricas (la competición
+    principal). Sin datos demo: un equipo inventado no es un equipo anterior. Un bloque (temporada + competición) sin
+    equipo en el dato no aparece; no se completa con otra fuente.
+    """
+    from scouting.services.objective_origin_policy import sofascore_origin_sql
+
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            f"""
+            SELECT season, competition, team_name
+            FROM (
+                SELECT om.season, om.competition, {_OBJECTIVE_TEAM_AGG} AS team_name, COUNT(*) AS metrics_count
+                FROM objective_metrics om
+                WHERE om.player_id = %s
+                  AND {sofascore_origin_sql("om")}
+                GROUP BY om.season, om.competition
+            ) blocks
+            WHERE team_name IS NOT NULL
+            ORDER BY season DESC NULLS LAST, metrics_count DESC, competition ASC NULLS LAST
+            """,
+            (player_id,),
+        )
+        return list(cur.fetchall())
+
+
+@cached_objective_read
+def get_latest_objective_team_by_player(conn: Connection, player_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """Último equipo conocido (temporada más reciente) de cada jugador indicado, según datos objetivos reales.
+
+    Solo trae a los jugadores que tienen algún equipo en sus datos; el resto no figura en el resultado. A igualdad de
+    temporada se toma el bloque con más métricas, igual que en `get_player_team_history`.
+    """
+    if not player_ids:
+        return {}
+    from scouting.services.objective_origin_policy import sofascore_origin_sql
+
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            f"""
+            SELECT DISTINCT ON (player_id) player_id, season, competition, team_name
+            FROM (
+                SELECT om.player_id, om.season, om.competition, {_OBJECTIVE_TEAM_AGG} AS team_name,
+                       COUNT(*) AS metrics_count
+                FROM objective_metrics om
+                WHERE om.player_id = ANY(%s)
+                  AND {sofascore_origin_sql("om")}
+                GROUP BY om.player_id, om.season, om.competition
+            ) blocks
+            WHERE team_name IS NOT NULL
+            ORDER BY player_id, season DESC NULLS LAST, metrics_count DESC, competition ASC NULLS LAST
+            """,
+            (list(player_ids),),
+        )
+        return {int(r["player_id"]): dict(r) for r in cur.fetchall()}
+
+
 def get_objective_players_summary(
     conn: Connection,
     *,

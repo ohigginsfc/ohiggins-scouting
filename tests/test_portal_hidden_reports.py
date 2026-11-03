@@ -10,7 +10,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from scouting.portal import accounts, security
-from scouting.repositories import reports_repository, attribute_ratings_repository
+from scouting.repositories import reports_repository, attribute_ratings_repository, dashboard_repository
 from scouting.services import reports_service, attribute_ratings_service
 
 
@@ -174,6 +174,8 @@ def test_real_portal_allows_hidden_management_for_both_roles(monkeypatch, user, 
     ratings = Mock(return_value=[dict(attribute_group='Técnica', attribute_name='Pase', rating=7, max_rating=10, notes='Nota de prueba')])
     monkeypatch.setattr(reports_repository, 'get_hidden_reports', read)
     monkeypatch.setattr(reports_repository, 'get_report_by_id', lambda *args: report)
+    monkeypatch.setattr(dashboard_repository, 'get_hidden_position_counts',
+                        lambda conn: [dict(position='Delantero', players_count=1, reports_count=1)])
     monkeypatch.setattr(attribute_ratings_repository, 'get_attribute_ratings_by_report', ratings)
     edit = Mock()
     monkeypatch.setattr(reports_repository, 'update_report_fields', edit)

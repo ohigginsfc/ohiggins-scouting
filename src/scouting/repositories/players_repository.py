@@ -240,6 +240,22 @@ def merge_player_empty_fields(
         conn.commit()
 
 
+def set_player_position_if_missing(conn: Connection, player_id: int, position: str, *, commit: bool = True) -> bool:
+    """Completa la posición de la ficha solo si está vacía (NULL o en blanco). Nunca pisa una posición que ya existe.
+
+    Devuelve si se cambió algo. Con `commit=False` la transacción queda abierta para que quien llama la cierre.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE players SET position = %s WHERE id = %s AND (position IS NULL OR trim(position) = '')",
+            (position, player_id),
+        )
+        changed = bool(cur.rowcount)
+    if commit:
+        conn.commit()
+    return changed
+
+
 def update_player_image_path(conn: Connection, player_id: int, image_path: str) -> None:
     with conn.cursor() as cur:
         cur.execute(

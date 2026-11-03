@@ -27,6 +27,9 @@ def manual_report_widget_defaults(
         "mr_match_observed": "",
         "mr_position_observed": "",
         "mr_minutes": 0,
+        # La valoración general es opcional: sin marcar esta casilla el informe se guarda sin valoración (NULL), en vez
+        # de guardar el valor inicial del control como si el scout lo hubiera elegido.
+        "mr_rate_report": False,
         "mr_rating_scout": 6.0,
         "mr_strengths": "",
         "mr_weaknesses": "",

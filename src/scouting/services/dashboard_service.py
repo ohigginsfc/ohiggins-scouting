@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Iterable
 from typing import Any
 
 from psycopg import Connection
@@ -17,6 +19,41 @@ def get_position_counts(conn: Connection) -> list[dict[str, Any]]:
 def get_position_counts_by_origin(conn: Connection) -> dict[str, list[dict[str, Any]]]:
     """Conteos por posición para los dos campogramas: `chilean`, `foreign` y `unknown` (sin nacionalidad)."""
     return nationality_service.split_position_counts(dashboard_repository.get_position_counts_by_nationality(conn))
+
+
+def get_hidden_position_counts(conn: Connection) -> list[dict[str, Any]]:
+    """Conteos por posición de los informes ocultos (campograma de informes ocultos); `position=None`: sin posición en la ficha."""
+    if os.environ.get("PORTAL_MODE") == "1":
+        from scouting.portal.security import require_user
+
+        require_user()
+    return dashboard_repository.get_hidden_position_counts(conn)
+
+
+def split_hidden_position_counts(rows: list[dict[str, Any]], map_positions: Iterable[str]) -> dict[str, Any]:
+    """Reparte los conteos de informes ocultos entre lo que se puede ubicar en el campograma y lo que no.
+
+    * `on_map`: posiciones que existen en el campograma.
+    * `off_map`: posiciones de la ficha que el campograma no reconoce (la posición es texto libre y puede venir de otra fuente).
+    * `no_position`: jugadores sin posición en la ficha, sumados en una sola fila (o `None` si no hay).
+    Ningún informe se pierde: lo que no cabe en el campo se cuenta aparte en vez de desaparecer.
+    """
+    known = set(map_positions)
+    on_map: list[dict[str, Any]] = []
+    off_map: list[dict[str, Any]] = []
+    no_position: dict[str, Any] | None = None
+    for row in rows:
+        position = row.get("position")
+        if not position:
+            if no_position is None:
+                no_position = {"position": None, "players_count": 0, "reports_count": 0}
+            no_position["players_count"] += int(row.get("players_count") or 0)
+            no_position["reports_count"] += int(row.get("reports_count") or 0)
+        elif position in known:
+            on_map.append(row)
+        else:
+            off_map.append(row)
+    return {"on_map": on_map, "off_map": off_map, "no_position": no_position}
 
 
 def get_position_summary(conn: Connection, position: str, *, origin: str | None = None) -> list[dict[str, Any]]:

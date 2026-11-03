@@ -58,7 +58,7 @@ def list_players_for_lookup(
 
     scouted = players_repository.get_players_with_reports(conn)
     if not include_objective_only:
-        return scouted
+        return _with_previous_teams(conn, scouted)
     objective_only = players_repository.get_players_objective_only(
         conn, season=get_active_season()
     )
@@ -70,7 +70,63 @@ def list_players_for_lookup(
             merged.append(p)
             seen.add(pid)
     merged.sort(key=lambda r: (str(r.get("full_name") or "")).lower())
-    return merged
+    return _with_previous_teams(conn, merged)
+
+
+def _clean_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return None if text.lower() in {"", "none", "nan", "null", "-", "—"} else text
+
+
+def _with_previous_teams(conn: Connection, players: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Completa, para los jugadores cuya ficha no tiene equipo, el último equipo que figura en sus datos objetivos.
+
+    Añade `previous_team` y `previous_team_season`; no toca `current_team`. Si el jugador no tiene datos objetivos
+    reales con equipo, no se inventa nada.
+    """
+    missing = [int(p["id"]) for p in players if not _clean_text(p.get("current_team"))]
+    if not missing:
+        return players
+    from scouting.repositories import metrics_repository
+
+    latest = metrics_repository.get_latest_objective_team_by_player(conn, missing)
+    out: list[dict[str, Any]] = []
+    for player in players:
+        info = latest.get(int(player["id"])) if not _clean_text(player.get("current_team")) else None
+        if info and _clean_text(info.get("team_name")):
+            player = {
+                **player,
+                "previous_team": _clean_text(info["team_name"]),
+                "previous_team_season": _clean_text(info.get("season")),
+            }
+        out.append(player)
+    return out
+
+
+def lookup_team_label(player: dict[str, Any]) -> str:
+    """Club que se muestra junto al nombre en «Consultar jugador».
+
+    Primero el equipo de la ficha de scouting; si la ficha no lo tiene, el último equipo que figura en los datos
+    objetivos, con su temporada (p. ej. «Temuco · 2025») para que no se confunda con el equipo actual; si no hay
+    ninguno, «—».
+    """
+    current = _clean_text(player.get("current_team"))
+    if current:
+        return current
+    previous = _clean_text(player.get("previous_team"))
+    if previous:
+        season = _clean_text(player.get("previous_team_season"))
+        return f"{previous} · {season}" if season else previous
+    return "—"
+
+
+def get_player_team_history(conn: Connection, player_id: int) -> list[dict[str, Any]]:
+    """Equipos del jugador por temporada y competición según sus datos objetivos reales; el más reciente primero."""
+    from scouting.repositories import metrics_repository
+
+    return metrics_repository.get_player_team_history(conn, player_id)
 
 
 def get_player_objective_data_status(conn: Connection, player_id: int) -> dict[str, Any]:
