@@ -14,7 +14,7 @@ import streamlit as st
 from scouting.portal import accounts
 from scouting.portal import readonly_pilot
 from scouting.portal.security import session_scope, require_admin
-from ui.portal_brand import inject_portal_brand, masthead, welcome, module_card, login_identity
+from ui.portal_brand import inject_portal_brand, masthead, welcome, module_card, login_identity, version_footer
 
 
 def logout():
@@ -235,3 +235,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    version_footer()
