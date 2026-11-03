@@ -112,7 +112,7 @@ def get_standings_by_category(category: Optional[str] = None) -> pd.DataFrame:
 
 
 # Una fila por jugador, categoría, temporada y año del partido: `yearly` las junta por año de temporada (el año del partido
-# solo sirve de respaldo cuando el nombre de la temporada no trae año). Así los goles se pueden separar por año.
+# solo sirve de respaldo, en hora de Santiago, cuando el nombre de la temporada no trae año). Así los goles se pueden separar por año.
 MATCH_YEAR_SQL = "(SELECT matchid, MIN(matchdate) AS matchdate FROM partidos GROUP BY matchid)"
 
 
@@ -127,7 +127,7 @@ def player_stats_by_year_sql(by_category: bool = False) -> str:
             j.level,
             c.category,
             c.season,
-            EXTRACT(YEAR FROM m.matchdate)::int AS match_year,
+            EXTRACT(YEAR FROM m.matchdate AT TIME ZONE 'America/Santiago')::int AS match_year,
             COUNT(DISTINCT a.matchid) AS matches,
             SUM(a.minutesplayed) AS minutes,
             SUM(CASE WHEN a.startinglineup THEN 1 ELSE 0 END) AS starts,
@@ -144,7 +144,7 @@ def player_stats_by_year_sql(by_category: bool = False) -> str:
           {category}
         GROUP BY
             j.personid, j.displayname, j.dateofbirth, j.nationality, j.level,
-            c.category, c.season, EXTRACT(YEAR FROM m.matchdate);
+            c.category, c.season, EXTRACT(YEAR FROM m.matchdate AT TIME ZONE 'America/Santiago');
     """
 
 
@@ -157,7 +157,7 @@ def goalkeeper_stats_by_year_sql(by_category: bool = False) -> str:
             EXTRACT(YEAR FROM AGE(j.dateofbirth)) AS age,
             c.category,
             c.season,
-            EXTRACT(YEAR FROM m.matchdate)::int AS match_year,
+            EXTRACT(YEAR FROM m.matchdate AT TIME ZONE 'America/Santiago')::int AS match_year,
             COUNT(DISTINCT a.matchid) AS matches,
             SUM(a.minutesplayed) AS minutes,
             SUM(a.goalsconceded) AS goals_conceded,
@@ -169,7 +169,7 @@ def goalkeeper_stats_by_year_sql(by_category: bool = False) -> str:
         WHERE a.clubid = {OHIGGINS_CLUB_ID}
           AND a.played = TRUE
           {category}
-        GROUP BY j.personid, j.displayname, j.dateofbirth, c.category, c.season, EXTRACT(YEAR FROM m.matchdate);
+        GROUP BY j.personid, j.displayname, j.dateofbirth, c.category, c.season, EXTRACT(YEAR FROM m.matchdate AT TIME ZONE 'America/Santiago');
     """
 
 
