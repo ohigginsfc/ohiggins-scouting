@@ -185,11 +185,18 @@ def marked_players(ctx: Context) -> dict:
     return grouped.to_dict()
 
 
+def _bajas_warning(ctx: Context) -> None:
+    if ctx.bajas_error:
+        st.warning(f'No se pudieron leer las bajas registradas ({ctx.bajas_error}). '
+                   'Las alertas pueden incluir jugadores dados de baja.')
+
+
 @admin_only
 def page_alerts() -> None:
     inject_styles()
     title('Alertas automáticas', 'Jugadores que requieren atención deportiva. Los umbrales y colores se configuran en Seguimiento.')
     ctx = context()
+    _bajas_warning(ctx)
     ds = ctx.ds
     if ds.facts.empty:
         st.info('COMET no tiene planillas de O’Higgins.')
@@ -474,6 +481,7 @@ def _tab_marks(ctx: Context) -> None:
 
 
 def _tab_digest(ctx: Context) -> None:
+    _bajas_warning(ctx)
     ds = ctx.ds
     recipients = ctx.rules.value('digest_recipients')
     default_start = pd.Timestamp(previous_week(ctx.today)[0])

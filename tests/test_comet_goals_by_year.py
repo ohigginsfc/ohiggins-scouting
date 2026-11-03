@@ -80,6 +80,24 @@ def test_goals_by_year_has_a_column_per_year_the_total_and_blanks_for_years_with
     assert list(yearly.goals_by_year(UNIT.iloc[0:0], stats).columns) == ['personid', 'displayname', 'category', 'Total']
 
 
+@pytest.mark.parametrize('years, goals, expected_years, expected_total', [
+    ([2026, None], [2, 3], ['2026'], 5),
+    ([None], [3], [], 3),
+])
+def test_goals_total_keeps_matches_without_a_known_season_year(years, goals, expected_years, expected_total):
+    frame = pd.DataFrame([stat(1, 'Ana', year, goals=scored) for year, scored in zip(years, goals)])
+    frame['season_year'] = pd.array(frame['season_year'], dtype='Int64')
+    players = yearly.stats_for_year(frame)
+
+    table = yearly.goals_by_year(frame, players)
+
+    assert table.loc[0, 'Total'] == players.loc[0, 'goals'] == expected_total
+    assert yearly.year_columns(table) == expected_years, 'sin fecha no se asigna un año ficticio'
+    assert list(table.columns) == ['personid', 'displayname', 'category', *expected_years, 'Total']
+    if expected_years:
+        assert table.loc[0, '2026'] == 2, 'solo los goles fechados se atribuyen a 2026'
+
+
 def test_keeper_stats_use_the_same_year_filter():
     keepers = pd.DataFrame([
         dict(personid=9, displayname='Portero', age=17, category='U-16', season_year=2025, matches=10, minutes=900,

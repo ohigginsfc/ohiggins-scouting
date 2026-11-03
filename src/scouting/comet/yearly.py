@@ -89,6 +89,7 @@ def goals_by_year(by_year: pd.DataFrame, players: pd.DataFrame) -> pd.DataFrame:
     """Goles de los jugadores de `players` (en su orden): una columna por año, más el total.
 
     Cada fila es un jugador en una categoría. Una celda vacía es un año sin partidos suyos en esa categoría.
+    El total también incluye los goles cuyo año de temporada falta, sin atribuirlos a ningún año.
     """
     shown = players[['personid', 'displayname', 'category']].drop_duplicates(['personid', 'category'])
     keys = shown[['personid', 'category']]
@@ -98,8 +99,8 @@ def goals_by_year(by_year: pd.DataFrame, players: pd.DataFrame) -> pd.DataFrame:
     wide = scope.groupby(['personid', 'category', 'season_year'])['goals'].agg(_total).unstack('season_year')
     wide = wide[sorted(wide.columns)]
     wide.columns = [str(int(y)) for y in wide.columns]
-    wide['Total'] = wide.sum(axis=1, min_count=1)
-    return shown.merge(wide.reset_index(), on=['personid', 'category'], how='left')
+    totals = scope.groupby(['personid', 'category'], dropna=False)['goals'].agg(_total).rename('Total')
+    return shown.merge(wide.join(totals, how='outer').reset_index(), on=['personid', 'category'], how='left')
 
 
 def year_columns(table: pd.DataFrame) -> list[str]:
