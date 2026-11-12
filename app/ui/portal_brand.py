@@ -7,7 +7,7 @@ import streamlit as st
 from ui.theme import inject_ohiggins_theme
 
 # Incrementar al publicar una nueva versión del portal.
-PORTAL_VERSION = '1.1.0'
+PORTAL_VERSION = '1.2.0'
 
 
 def crest():

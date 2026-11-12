@@ -24,6 +24,13 @@ def _rival(value) -> str:
     return value if isinstance(value, str) and value else 'rival sin nombre'
 
 
+def player_name(ctx: Context, personid: str) -> str:
+    """Nombre del jugador para títulos y nombres de archivo; sin ficha en COMET se usa su identificador."""
+    names = ctx.ds.players.loc[ctx.ds.players['personid'] == personid, 'displayname']
+    value = names.iloc[0] if len(names) else None
+    return value if isinstance(value, str) and value else f'Jugador {personid}'
+
+
 def _above_age(steps) -> str | None:
     if pd.isna(steps):
         return None
@@ -93,6 +100,7 @@ def render_match_log(ctx: Context, personid: str, key: str, oldest_first: bool =
         'onpitch_score_exit': ('Marcador al salir', None), 'onpitch_state_exit': ('Al salir', None),
         'onpitch_changed': ('¿Cambió el resultado?', None),
         'onpitch_for': ('Goles a favor en cancha', FMT_INT), 'onpitch_against': ('Goles en contra en cancha', FMT_INT),
-        'onpitch_status': ('Cronología', None)}, colors=('result', RESULT_STYLE))
+        'onpitch_status': ('Cronología', None)}, colors=('result', RESULT_STYLE),
+        name=f'Partidos · {player_name(ctx, personid)}')
     st.caption('Gol y cambio en el mismo minuto: se cuenta el gol con el jugador dentro. Las subidas de categoría se detectan '
                'comparando con los partidos que COMET tiene registrados: antes de ese historial no se sabe en qué categoría jugó.')

@@ -192,6 +192,44 @@ La confirmación de Pablo sigue siendo un acto aparte de un administrador.
 * Los reportes por correo de `comet_reports` (script aparte, que no pasa por las pantallas) no aplican las bajas todavía.
 * La migración 005 no se aplicó en ninguna base real.
 
+## Descarga en Excel (12-11-2026)
+
+**Pedido.** Que las tablas que ve Pablo en COMET se puedan descargar en Excel, de preferencia con una opción propia de Streamlit.
+Se resolvió con `st.download_button`: no hay dependencias nuevas (`openpyxl` ya estaba en `requirements.txt`) ni nada que configurar.
+
+**Qué hace.** Bajo **cada** tabla de las doce secciones de COMET aparece el botón **Descargar Excel**. Baja un archivo
+`comet_<tabla>_<aaaa-mm-dd>.xlsx` (por ejemplo `comet_ranking_minutos_jugados_u_15_2026_2026-11-12.xlsx`) con las **mismas filas y columnas que se ven**,
+con los filtros que estén puestos en ese momento (categoría, temporada, año, jugador…). Las tablas de las pantallas antiguas (Resumen ejecutivo, Desarrollo juvenil,
+Rendimiento competitivo, Análisis de jugadores, Estructura del plantel) pasaron a usar los mismos componentes que las nuevas; por eso ahora también muestran «—»
+donde falta un dato, en lugar de «None».
+
+* **Hoja con la tabla.** Encabezado azul del club en negrita, primera fila fija, filtros en los encabezados y ancho de columna ajustado. Los números quedan como
+  números (se ordenan, suman y grafican) con el mismo formato que en pantalla, y las columnas que en pantalla llevan color (resultado, nivel de alerta…) lo conservan.
+* **Dato ausente = celda vacía.** En pantalla se ve «—». En el Excel la celda queda **vacía**, no en 0 ni con el texto «—»: así una suma o un gráfico de Excel no tratan
+  como cero un dato que falta. Un 0 verdadero se conserva como 0.
+* **Hoja «Información».** Nombre de la tabla, cantidad de filas, fecha y hora de generación (hora de Chile), origen y **versión del portal** con la que se bajó.
+  Si la pantalla muestra **criterios provisionales** (reglas que Pablo todavía no confirma), los mismos avisos se repiten ahí: quien reciba el archivo no toma
+  como oficial una cifra que depende de un supuesto.
+* **Nada nuevo se consulta ni se guarda.** El archivo se arma en el momento con los datos que la pantalla ya cargó; el botón solo existe dentro de las pantallas de COMET,
+  que siguen siendo solo para Admin. Un texto que parezca fórmula (empieza con `=`, `+`, `-` o `@`, por ejemplo una nota o el nombre de un rival) se guarda como texto, y
+  los caracteres de control se limpian.
+* **Si el Excel no se puede preparar**, la tabla se ve igual y aparece el aviso «No se pudo preparar la descarga en Excel de esta tabla.»; la pantalla no se cae.
+
+Las tablas interactivas también traen el ícono de descarga CSV propio de Streamlit (arriba a la derecha de la tabla, al pasar el cursor). El botón **Descargar Excel**
+es el recomendado para compartir: baja el archivo ordenado, con formato y con la hoja «Información».
+
+Una prueba impide que se agregue una tabla a COMET sin botón: toda llamada a `show_table` / `show_static_table` en las pantallas COMET debe llevar `name=`,
+y esas pantallas no pueden usar `st.dataframe` / `st.table` directamente. El código del archivo está en `src/scouting/comet/excel_export.py` (puro, sin Streamlit) y el botón en `app/ui/comet_widgets.py`.
+
+**Versión del portal.** Pasó de `v1.1.0` a **`v1.2.0`** (`PORTAL_VERSION` en `app/ui/portal_brand.py`). Se ve abajo a la derecha en la página de inicio y en las demás,
+para comprobar que el despliegue en el servidor tiene la versión nueva.
+
+### Lo que no se pudo comprobar
+
+* Los archivos se abrieron con `openpyxl` y se bajaron desde un navegador real contra datos ficticios, pero no se abrieron en Microsoft Excel ni en LibreOffice.
+* Con datos reales de COMET (tablas de cientos de jugadores): solo se midió con datos ficticios, unos 15 a 20 ms por tabla. El archivo se rearma cada vez que la pantalla se dibuja.
+* Que el pie de página del servidor muestre `v1.2.0`: se verá cuando se despliegue.
+
 ## Reglas y preguntas pendientes para Pablo
 
 Estas son las siete cosas que el documento pedía confirmar. Cada una tiene un criterio provisional ya aplicado,
@@ -301,12 +339,12 @@ Comprobación de accesos con el portal real: Admin ve las doce secciones de COME
 
 | Ruta | Contenido |
 |---|---|
-| `src/scouting/comet/` | Cálculos puros: categorías, reglas, datos, métricas, alertas, indicadores, adelantados (con `player_timeline`, las subidas de categoría), `roster` (plantel vigente), `yearly` (cifras por año), calidad, `pipeline` (cálculo compartido con el resumen), resumen, correo, `ledger` (registro de entregas), consultas y almacén de configuración |
+| `src/scouting/comet/` | Cálculos puros: categorías, reglas, datos, métricas, alertas, indicadores, adelantados (con `player_timeline`, las subidas de categoría), `roster` (plantel vigente), `yearly` (cifras por año), calidad, `pipeline` (cálculo compartido con el resumen), `excel_export` (archivo .xlsx de una tabla), resumen, correo, `ledger` (registro de entregas), consultas y almacén de configuración |
 | `app/comet_context.py` | Carga de datos y contexto con permisos y caché |
 | `app/comet_followup.py`, `app/comet_insights.py` | Las siete pantallas |
 | `app/comet_squad.py` | Plantel vigente en las pantallas antiguas: avisos, revisión del plantel y bajas |
 | `app/comet_matchlog.py` | Historial de partidos de un jugador con sus subidas de categoría (Ficha del jugador y Jugadores adelantados) |
-| `app/ui/comet_widgets.py` | Formato «—», etiquetas de estado, colores accesibles |
+| `app/ui/comet_widgets.py` | Formato «—», etiquetas de estado, colores accesibles y el botón «Descargar Excel» de las tablas |
 | `db/portal/003_comet_followup.sql` | Migración de configuración (no aplicada) |
 | `db/portal/005_comet_player_bajas.sql` | Migración de las bajas de jugadores (no aplicada) |
 | `scripts/send_comet_weekly_digest.py` | Resumen semanal (vista previa por defecto) |
