@@ -5,17 +5,26 @@ Un dato ausente se muestra como "—", nunca como 0.
 """
 from __future__ import annotations
 
+import logging
 from html import escape
 from typing import Callable, Mapping, Optional
 
 import pandas as pd
 import streamlit as st
+from streamlit.errors import DuplicateWidgetID
 
-from scouting.comet import yearly
+from scouting.comet import excel_export, yearly
 from scouting.comet.alerts import ALERT_COLORS
 from scouting.comet.rules import RULES_BY_KEY, STATUS_CONFIRMED, STATUS_PENDING, STATUS_REQUESTED
+from ui.portal_brand import PORTAL_VERSION
+
+logger = logging.getLogger(__name__)
 
 MISSING = '—'
+EXCEL_LABEL = 'Descargar Excel'
+EXCEL_HELP = 'Descarga esta tabla en un archivo de Excel (.xlsx), con las mismas columnas y filas que se ven.'
+_NOTES_KEY = '_cm_provisional_notes'  # criterios provisionales de la pantalla abierta, para repetirlos en el Excel
+_MAX_BUTTONS_PER_TABLE = 200
 
 STATUS_STYLE = {STATUS_REQUESTED: 'Azul', STATUS_CONFIRMED: 'Verde', STATUS_PENDING: 'Naranja'}
 RESULT_STYLE = {'Victoria': 'Verde', 'Empate': 'Amarillo', 'Derrota': 'Rojo'}
@@ -74,14 +83,26 @@ def year_filter(years: list[int], key: str, label: str = 'Año') -> Optional[int
     return st.selectbox(label, [None] + list(years), format_func=yearly.label, key=key)
 
 
+def _remember_notes(plain: list[str]) -> None:
+    """Guarda los criterios provisionales de la pantalla abierta: el Excel de sus tablas los repite en la hoja «Información»."""
+    st.session_state[_NOTES_KEY] = (st.session_state.get('comet_section'), tuple(plain))
+
+
+def _provisional_notes() -> tuple:
+    saved = st.session_state.get(_NOTES_KEY)
+    return saved[1] if saved and saved[0] == st.session_state.get('comet_section') else ()
+
+
 def rule_note(rules, keys: list[str]) -> None:
     """Aviso con el estado de las reglas que usa la pantalla; solo aparece si alguna es un supuesto."""
-    lines = []
+    lines, plain = [], []
     for key in keys:
         status = rules.status(key)
         if status == STATUS_PENDING:
             rule = RULES_BY_KEY[key]
             lines.append(f'{status_pill(status)} <strong>{escape(rule.label)}.</strong> {escape(rule.applied)}')
+            plain.append(f'{status} · {rule.label}. {rule.applied}')
+    _remember_notes(plain)
     if lines:
         st.markdown('<div class="cm-note"><strong>Criterios provisionales.</strong> Estas cifras dependen de reglas que '
                     'el club aún no ha confirmado:<br>' + '<br>'.join(lines) + '</div>', unsafe_allow_html=True)
@@ -113,42 +134,93 @@ def color_column(styler, column: str, colors: Mapping[str, str]):
     return styler.map(paint, subset=[column])
 
 
+def _fills(title: str, mapping: Mapping[str, str]) -> dict:
+    """Colores de una columna para el Excel: {título: {valor: (texto, fondo)}}, los mismos que se ven en pantalla."""
+    return {title: {value: ALERT_COLORS[name] for value, name in mapping.items() if name in ALERT_COLORS}}
+
+
+def download_excel(frame: pd.DataFrame, name: str, *, formats: Optional[Mapping] = None,
+                   fills: Optional[Mapping] = None) -> None:
+    """Botón «Descargar Excel» para una tabla: baja los mismos datos y columnas que se ven, con los ausentes en blanco.
+
+    `frame` lleva los títulos de columna tal como se muestran y los valores reales (no el texto «—»). `name` describe la
+    tabla («Ranking de goles · U-15 2026»): da el nombre del archivo y de la hoja. Si el Excel no se puede preparar, la
+    tabla igual se ve; solo falta el botón.
+    """
+    try:
+        data = excel_export.build_workbook(frame, name, number_formats=formats, fills=fills, notes=_provisional_notes(),
+                                           portal_version=PORTAL_VERSION)
+    except Exception:
+        logger.exception('No se pudo preparar el Excel de «%s»', name)
+        st.caption('No se pudo preparar la descarga en Excel de esta tabla.')
+        return
+    base = f'cm_xlsx_{excel_export.slug(name)}'
+    for attempt in range(1, _MAX_BUTTONS_PER_TABLE + 1):  # dos tablas con el mismo nombre no deben repetir la clave
+        try:
+            # Sin ícono Material: el tema del portal fuerza su tipografía en todos los span y el ícono se vería como texto.
+            st.download_button(EXCEL_LABEL, data, file_name=excel_export.export_filename(name),
+                               mime=excel_export.XLSX_MIME, key=base if attempt == 1 else f'{base}_{attempt}',
+                               help=EXCEL_HELP)
+            return
+        except DuplicateWidgetID:
+            continue
+    logger.error('Demasiadas tablas con el mismo nombre «%s»: sin botón de Excel', name)
+
+
 def show_table(frame: pd.DataFrame, columns: Mapping[str, tuple], *, key: Optional[str] = None,
-               colors: Optional[tuple] = None, height: Optional[int] = None) -> None:
-    """Muestra `frame` con las columnas indicadas: {columna: (título, formato o None)}."""
+               colors: Optional[tuple] = None, height: Optional[int] = None, name: Optional[str] = None) -> None:
+    """Muestra `frame` con las columnas indicadas: {columna: (título, formato o None)}.
+
+    Con `name`, agrega bajo la tabla el botón «Descargar Excel» (ver `download_excel`).
+    """
     if frame.empty:
         st.caption('Sin registros.')
         return
     if height is None:  # alto justo para todas las filas (hasta 640 px); no se cortan filas a la vista
         height = min(35 * (len(frame) + 1) + 3, 640)
     present = {c: v for c, v in columns.items() if c in frame.columns}
-    view = frame[list(present)].rename(columns={c: v[0] for c, v in present.items()})
+    values = frame[list(present)].rename(columns={c: v[0] for c, v in present.items()})
     formats = {v[0]: v[1] for v in present.values() if v[1]}
+    excel_formats = dict(formats)
+    view = values.copy()
     for column in view.columns:
         if view[column].isna().any():
             # Streamlit dibuja las celdas vacías como "None"; con texto, un dato ausente se ve como "—".
             view[column] = [MISSING if pd.isna(v) else _render(v, formats.get(column)) for v in view[column]]
             formats.pop(column, None)
     styler = styled(view, formats)
+    fills = None
     if colors:
         column, mapping = colors
-        styler = color_column(styler, present[column][0] if column in present else column, mapping)
+        color_title = present[column][0] if column in present else column
+        styler = color_column(styler, color_title, mapping)
+        fills = _fills(color_title, mapping)
     st.dataframe(styler, hide_index=True, use_container_width=True, key=key, height=height)
+    if name and len(values.columns):
+        download_excel(values, name, formats=excel_formats, fills=fills)
 
 
-def show_static_table(frame: pd.DataFrame, columns: Mapping[str, tuple], *, colors: Optional[tuple] = None) -> None:
-    """Tabla que ajusta el texto largo (las tablas interactivas lo cortan). La primera columna hace de índice."""
+def show_static_table(frame: pd.DataFrame, columns: Mapping[str, tuple], *, colors: Optional[tuple] = None,
+                      name: Optional[str] = None) -> None:
+    """Tabla que ajusta el texto largo (las tablas interactivas lo cortan). La primera columna hace de índice.
+
+    Con `name`, agrega bajo la tabla el botón «Descargar Excel» (ver `download_excel`).
+    """
     if frame.empty:
         st.caption('Sin registros.')
         return
     present = {c: v for c, v in columns.items() if c in frame.columns}
-    view = frame[list(present)].rename(columns={c: v[0] for c, v in present.items()})
-    view = view.set_index(view.columns[0])
+    values = frame[list(present)].rename(columns={c: v[0] for c, v in present.items()})
+    view = values.set_index(values.columns[0])
     styler = view.style.format(na_rep=MISSING)
+    fills = None
     if colors:
         column, mapping = colors
         styler = color_column(styler, present[column][0], mapping)
+        fills = _fills(present[column][0], mapping)
     st.table(styler)
+    if name:
+        download_excel(values, name, fills=fills)
 
 
 def alert_tile(count: int, label: str, color: str) -> str:

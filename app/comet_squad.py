@@ -179,7 +179,8 @@ def render_baja_panel(r: Roster, category: str) -> None:
                     st.rerun()
         if len(baja):
             st.markdown(f'**Bajas registradas en {category}**')
-            show_table(baja, {'displayname': ('Jugador', None), 'age': ('Edad', FMT_INT), 'reason': ('Baja', None)})
+            show_table(baja, {'displayname': ('Jugador', None), 'age': ('Edad', FMT_INT), 'reason': ('Baja', None)},
+                       name=f'Bajas registradas · {category}')
             _reinstate_form(r, baja, f'{category}', disabled)
 
 
@@ -197,20 +198,21 @@ def render_audit(r: Roster, order: list[str]) -> None:
     show_table(roster.summary_by_category(r.classified, order), {
         'Categoría': ('Categoría', None), 'Vigentes': ('Vigentes (cuentan)', FMT_INT),
         roster.STATE_INACTIVE: (roster.STATE_INACTIVE, FMT_INT), roster.STATE_BAJA: (roster.STATE_BAJA, FMT_INT),
-        'Registrados en COMET': ('Registrados en COMET', FMT_INT)})
+        'Registrados en COMET': ('Registrados en COMET', FMT_INT)}, name='Plantel · resumen por categoría')
     with st.expander('¿Qué plazo conviene? Cuántos jugadores quedarían vigentes con cada uno'):
         st.caption('Cada fila repite la regla automática con otro plazo, para elegirlo con los datos a la vista. '
                    'El plazo vigente se cambia en Seguimiento y configuración → Reglas.')
         show_table(roster.calibration(r.classified, r.today, r.bajas), {
             'Días sin planilla': ('Días sin planilla', FMT_INT), 'Vigentes': ('Vigentes', FMT_INT),
-            'Primer Equipo': ('Primer Equipo', FMT_INT), 'Categorías menores': ('Categorías menores', FMT_INT)})
+            'Primer Equipo': ('Primer Equipo', FMT_INT), 'Categorías menores': ('Categorías menores', FMT_INT)},
+            name='Plantel · plazo de actividad')
     views = {'Sin actividad reciente (no cuentan)': roster.STATE_INACTIVE, 'Con baja registrada': roster.STATE_BAJA,
              'Vigentes (cuentan)': roster.STATE_CURRENT}
     chosen = st.selectbox('Ver los jugadores', list(views), key='squad_audit_view')
     rows = r.classified[r.classified['state'] == views[chosen]].sort_values(['age_category', 'displayname'])
     show_table(rows, {'displayname': ('Jugador', None), 'age': ('Edad', FMT_INT), 'age_category': ('Categoría', None),
                       'nationality': ('Nacionalidad', None), 'last_sheet': ('Última planilla', DATE),
-                      'reason': ('Detalle', None)})
+                      'reason': ('Detalle', None)}, name=f'Plantel · {chosen}')
     bajas = r.classified[r.classified['state'] == roster.STATE_BAJA]
     if len(bajas):
         _reinstate_form(r, bajas, 'audit', not r.can_write)

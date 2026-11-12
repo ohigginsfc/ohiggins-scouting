@@ -20,6 +20,7 @@ automáticas, jugadores adelantados y configuración. Se puede revisar sin datos
 `streamlit run scripts/demo_comet_followup.py --server.address=127.0.0.1` (datos ficticios).
 Partido semanal y Ficha del jugador incluyen el [marcador al entrar y salir](docs/resultado-con-jugador-en-cancha.md),
 cuando goles y cambios permiten reconstruirlo; requieren la lectura de eventos (migración 004).
+Cada tabla de COMET se puede bajar con el botón [Descargar Excel](docs/comet-seguimiento-deportivo.md#descarga-en-excel-12-11-2026).
 
 Consultar el [manual de cuentas, permisos y despliegue del portal](docs/unified-portal.md).
 Si Auth no responde pero PostgreSQL sí, existe un [modo de recuperación para el
