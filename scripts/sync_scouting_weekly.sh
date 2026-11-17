@@ -3,8 +3,8 @@
 set -Eeuo pipefail
 umask 077
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
-mkdir -p data/runtime data/logs
-exec 9>data/runtime/sofascore-weekly.lock
+mkdir -p data/recovery/manual-2026 data/logs
+exec 9>data/recovery/manual-2026/weekly.lock
 if ! flock -n 9; then
     echo 'Sofascore: another weekly sync is running.' >&2
     exit 75

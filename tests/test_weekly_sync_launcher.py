@@ -53,8 +53,8 @@ class LauncherTests(unittest.TestCase):
 
     def test_overlapping_run_is_rejected_before_docker(self):
         import fcntl
-        (self.root / 'data/runtime').mkdir(parents=True)
-        with (self.root / 'data/runtime/sofascore-weekly.lock').open('w') as lock:
+        (self.root / 'data/recovery/manual-2026').mkdir(parents=True)
+        with (self.root / 'data/recovery/manual-2026/weekly.lock').open('w') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             self.assertEqual(self.invoke().returncode, 75)
         self.assertFalse(self.output.exists())

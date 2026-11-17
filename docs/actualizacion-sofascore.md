@@ -3,7 +3,8 @@
 Guía para el **administrador del servidor**. Actualizada el 17 de noviembre de 2026.
 
 El worker actualiza Chile/Primera/2026 en el esquema `scouting` de Supabase.
-El portal y el worker son procesos independientes: **levantar la web no instala ni ejecuta el cron**.
+El portal y el worker son procesos independientes: **levantar solo la web no inicia el sincronizador**.
+La opción recomendada es el [servicio Docker en segundo plano](#8-servicio-docker-en-segundo-plano-recomendado); el cron del host es una alternativa. Usar una sola opción.
 La fecha de descarga y el alcance del último intento semanal quedan en `data/recovery/manual-2026/weekly-summary.json`.
 Solo `status=published` y `applied=true` confirman una publicación del comando semanal; `validated`, `blocked` o `stopped` no la confirman.
 
@@ -90,7 +91,7 @@ No borrar un checkpoint incompleto ni lanzar dos recolectores sobre la misma car
 
 ## 6. Pendientes y validación realizada
 
-La instalación del cron en EC2 corresponde al administrador del servidor. No se activa al hacer `git pull`, reconstruir la imagen ni iniciar Streamlit.
+La activación del sincronizador en EC2 corresponde al administrador del servidor. No se activa al hacer `git pull`, reconstruir solo el portal ni iniciar Streamlit.
 GitHub Actions sigue sin una descarga directa validada de Sofascore. El acceso correcto desde un PC no garantiza acceso desde la IP de EC2.
 
 Como referencia histórica, la publicación del 03/10/2026 validó 183 partidos y 523 jugadores. Las siguientes ejecuciones deben comprobarse con su propio resumen y lote, no con esas cifras.
@@ -142,3 +143,47 @@ cat data/recovery/manual-2026/weekly-summary.json
 El resumen incluye inicio, final, corte, último partido, cantidades y resultado de publicación. Un proceso solapado sale con código 75; un bloqueo del proveedor, con 2; un fallo o presupuesto agotado, con 1.
 Conservar y rotar los logs y respaldos privados. No ejecutar el procedimiento manual sobre la misma carpeta mientras corre el semanal.
 Si EC2 devuelve 403, dejar el cron sin activar y actualizar desde un equipo con acceso comprobado; no repetir peticiones ni asumir que Docker cambia la IP.
+
+## 8. Servicio Docker en segundo plano (recomendado)
+
+Este servicio sustituye al cron del host. Requiere el checkout actualizado, Docker Compose, el `.env.portal` privado y la caché de 2026 conservada, como se explica arriba.
+Comprobar primero el acceso desde EC2 con `collector probe`. Si hay 403/429, resolverlo antes de activar el servicio.
+Revisar `crontab -l` y desactivar cualquier tarea anterior de Sofascore antes de usar esta opción.
+
+Desde la raíz del repo:
+
+```bash
+docker compose --env-file .env.portal -f docker-compose.sync.yml --profile scheduler up -d --build scheduler
+```
+
+Queda ejecutándose en segundo plano, sin publicar puertos ni depender de la web. Se reinicia con Docker salvo que el administrador lo detenga explícitamente.
+Programa una ejecución los **martes a las 06:15 UTC**. Al instalarlo por primera vez solo agenda la siguiente ejecución; **no descarga al arrancar**.
+La agenda y el último resultado persisten en `data/recovery/manual-2026/scheduler-state.json`.
+Si el servidor estuvo apagado y hay una ejecución pendiente, realiza un solo intento al volver, sin acumular semanas de descargas.
+
+La descarga mantiene el límite de 240 peticiones y 30 minutos. Un watchdog detiene el proceso completo si supera una hora incluyendo la publicación.
+Un 403/429 deja el intento registrado y no provoca un bucle de reintentos. Un reinicio durante una ejecución la marca como interrumpida y conserva la próxima fecha y el checkpoint.
+El bloqueo `data/recovery/manual-2026/weekly.lock` es compartido con el lanzador del cron, para evitar publicaciones solapadas.
+No iniciar dos schedulers ni ejecutar `collect` manualmente mientras el servicio está trabajando.
+
+Ver el estado y los logs (rotación automática: tres archivos de hasta 5 MB):
+
+```bash
+docker compose --env-file .env.portal -f docker-compose.sync.yml --profile scheduler ps scheduler
+docker compose --env-file .env.portal -f docker-compose.sync.yml --profile scheduler logs --tail 50 scheduler
+cat data/recovery/manual-2026/scheduler-state.json
+cat data/recovery/manual-2026/weekly-summary.json
+```
+
+`waiting` significa que espera la próxima fecha; `success` confirma que el worker terminó con código 0.
+Comprobar también `weekly-summary.json`: la publicación requiere `status=published` y `applied=true`.
+Antes de la primera ejecución puede no existir ese resumen semanal. `blocked`, `failed`, `timeout`, `busy` o `interrupted` requieren revisar los logs.
+
+Para detenerlo antes de una intervención manual:
+
+```bash
+docker compose --env-file .env.portal -f docker-compose.sync.yml --profile scheduler stop scheduler
+```
+
+Para retomarlo, repetir `up -d --build scheduler`. Conservar `data/recovery` para mantener la caché, el cooldown y la agenda.
+El éxito del servicio local no valida el acceso de la IP de EC2 al proveedor; esa comprobación corresponde al administrador.
