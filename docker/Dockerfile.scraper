@@ -7,6 +7,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         chromium \
         chromium-driver \
+        util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 ENV CHROME_BINARY=/usr/bin/chromium
@@ -30,6 +31,7 @@ RUN python -m pip install --no-cache-dir -r /app/requirements.txt \
 # E) Validar
 RUN chromium --version \
     && chromedriver --version \
+    && command -v flock \
     && python -c "import selenium; print('Selenium', selenium.__version__)"
 
 COPY . .

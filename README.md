@@ -87,9 +87,9 @@ las pruebas no demuestran que la IP sea la única causa.
 - [Prueba HTTP desde GitHub Actions](https://github.com/ohigginsfc/ohiggins-scouting/actions/runs/35831454593): rechazada por el proveedor, sin escrituras en la BD.
 - [Verificación de Supabase desde Actions](https://github.com/ohigginsfc/ohiggins-scouting/actions/runs/35829941551): conexión y lectura correctas.
 
-**La sincronización semanal todavía no está activa.** La actualización manual de 2026 se realiza con el procedimiento documentado
-más abajo. Queda programarla en un entorno con acceso comprobado a Sofascore. Un runner propio
-es una alternativa pendiente de configurar y probar. Los históricos 2024/2025
+**La sincronización semanal se activa como servicio Docker en segundo plano.** Los [pasos de activación](docs/actualizacion-sofascore.md#8-servicio-docker-en-segundo-plano-recomendado)
+usan caché incremental, bloqueo y publicación validada. Desplegar solo la web no inicia ese servicio.
+El administrador debe comprobar primero el acceso de EC2 a Sofascore. Los históricos 2024/2025
 se conservan; no necesitan una descarga completa cada semana.
 
 ## Requisitos
@@ -422,8 +422,9 @@ en `publication.json`, con ID del lote, partidos, métricas y ruta del respaldo.
 
 Comprobar el resultado en el dashboard y refrescar la página si conserva una
 vista anterior. Mantener la descarga de la interfaz desactivada: este comando
-manual es independiente del pipeline antiguo de la UI. La programación semanal
-queda pendiente; no hay cron ni ejecución automática al desplegar la web.
+manual es independiente del pipeline antiguo de la UI. Para programarlo, seguir el
+[procedimiento del servidor](docs/actualizacion-sofascore.md#8-servicio-docker-en-segundo-plano-recomendado).
+El administrador debe levantar el servicio `scheduler`; el cron es una alternativa.
 
 ### Otras opciones de despliegue
 

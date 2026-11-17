@@ -139,3 +139,13 @@ def test_probe_cli_valid_page_is_access_only(monkeypatch, tmp_path, capsys):
     assert report['database_writes'] is False
     assert report['calendar_events'] == report['requests'] == 1
     assert not folder.exists()
+
+
+def test_weekly_cli_apply_requires_database_configuration_before_http(monkeypatch):
+    monkeypatch.syspath_prepend(str(m.r.ROOT / 'scripts'))
+    import manual_scouting_sync as cli
+    monkeypatch.delenv('SCOUTING_DATABASE_URL', raising=False)
+    monkeypatch.setattr(m, 'Http', lambda **_: pytest.fail('HTTP initialized without publication config'))
+    with pytest.raises(SystemExit) as failure:
+        cli.main(['weekly', '--apply'])
+    assert failure.value.code == 2
