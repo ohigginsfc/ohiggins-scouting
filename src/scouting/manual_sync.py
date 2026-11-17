@@ -8,9 +8,11 @@ from pathlib import Path
 
 import pandas as pd
 from scouting import sofascore_recovery as r
+from scouting.sofascore_leagues import DEFAULT_LEAGUE
 
-SCOPE = dict(country='cl', division='primera', season='2026', competition=r.COMPETITION)
-SEASON_ID = 88493
+# Backward-compatible aliases for callers of the original Primera worker.
+SCOPE = DEFAULT_LEAGUE.scope
+SEASON_ID = DEFAULT_LEAGUE.season_id
 
 
 def save(path, value):
@@ -21,22 +23,29 @@ def read(path):
     return json.loads(Path(path).read_text(encoding='utf-8'))
 
 
-def validate_event(event):
-    r.validate_event(event, {'season_id': SEASON_ID})
+def validate_scope(state, league=DEFAULT_LEAGUE):
+    if (state.get('version') != 1 or state.get('season_id') != league.season_id
+            or state.get('tournament_id', DEFAULT_LEAGUE.tournament_id) != league.tournament_id
+            or state.get('league_key', DEFAULT_LEAGUE.key) != league.key
+            or state.get('scope', league.scope) != league.scope):
+        raise ValueError('Wrong checkpoint scope/version')
+
+
+def validate_event(event, *, league=DEFAULT_LEAGUE):
+    r.validate_event(event, {'season_id': league.season_id, 'tournament_id': league.tournament_id})
     if event.get('status', {}).get('type') != 'finished':
         raise ValueError('Only finished events can be published')
 
 
-def validate(state):
-    if state.get('season_id') != SEASON_ID or state.get('version') != 1:
-        raise ValueError('Wrong candidate scope/version')
+def validate(state, *, league=DEFAULT_LEAGUE):
+    validate_scope(state, league)
     if not state.get('calendar_complete') or not state.get('events'):
         raise ValueError('Incomplete calendar')
     if set(state['events']) != set(state['matches']):
         raise ValueError('Incomplete season; publication refused')
     raw = {}
     for eid, event in state['events'].items():
-        validate_event(event)
+        validate_event(event, league=league)
         if str(event['id']) != eid:
             raise ValueError('Event identity mismatch')
         match = state['matches'][eid]
@@ -65,33 +74,33 @@ class Http(r.HttpTransport):
         return value
 
 
-def probe(fetch):
+def probe(fetch, *, league=DEFAULT_LEAGUE):
     """Validate one calendar page without creating a checkpoint or importing data."""
-    data = fetch(r.scraper.BASE_URL + f'/unique-tournament/11653/season/{SEASON_ID}/events/last/0')
+    data = fetch(r.scraper.BASE_URL + f'/unique-tournament/{league.tournament_id}/season/{league.season_id}/events/last/0')
     if not isinstance(data.get('events'), list) or type(data.get('hasNextPage')) is not bool:
         raise ValueError('Invalid calendar page')
     for event in data['events']:
-        r.validate_event(event, {'season_id': SEASON_ID})
+        r.validate_event(event, {'season_id': league.season_id, 'tournament_id': league.tournament_id})
     if not data['events']:
         raise ValueError('Empty calendar page; access not verified')
-    return {'status': 'access_ok', 'season_id': SEASON_ID,
+    return {'status': 'access_ok', 'season_id': league.season_id,
             'calendar_events': len(data['events']), 'has_next_page': data['hasNextPage'],
             'calendar_complete': False, 'database_writes': False}
 
 
-def collect(folder, fetch, *, resume=False, lookback_days=14):
+def collect(folder, fetch, *, resume=False, lookback_days=14, league=DEFAULT_LEAGUE):
     folder = Path(folder)
     path = folder / 'candidate.json'
     if resume:
         state = read(path)
-        if state.get('version') != 1 or state.get('season_id') != SEASON_ID:
-            raise ValueError('Wrong checkpoint scope/version')
+        validate_scope(state, league)
     else:
         previous = read(path) if path.exists() else {'matches': {}}
         if path.exists():
-            validate(previous)  # Never discard an unfinished run implicitly.
+            validate(previous, league=league)  # Never discard an unfinished run implicitly.
             save(folder / 'history' / (r.digest(previous) + '.json'), previous)
-        state = dict(version=1, season_id=SEASON_ID, cutoff=r.now(),
+        state = dict(version=1, season_id=league.season_id, tournament_id=league.tournament_id,
+                     league_key=league.key, scope=league.scope, cutoff=r.now(),
                      lookback_days=lookback_days, calendar_complete=False,
                      events={}, matches={}, cache=previous['matches'], page=0)
         save(path, state)
@@ -100,11 +109,12 @@ def collect(folder, fetch, *, resume=False, lookback_days=14):
         page = state['page']
         if page >= 30:
             raise ValueError('Calendar pagination budget exceeded')
-        data = fetch(r.scraper.BASE_URL + f'/unique-tournament/11653/season/{SEASON_ID}/events/last/{page}')
+        data = fetch(r.scraper.BASE_URL + f'/unique-tournament/{league.tournament_id}/season/{league.season_id}/events/last/{page}')
         if not isinstance(data.get('events'), list) or type(data.get('hasNextPage')) is not bool:
             raise ValueError('Invalid calendar page')
         for event in data['events']:
-            r.validate_event(event, state)
+            validate_event_state = {'season_id': league.season_id, 'tournament_id': league.tournament_id}
+            r.validate_event(event, validate_event_state)
             if event.get('status', {}).get('type') == 'finished' and event['startTimestamp'] <= cutoff.timestamp():
                 state['events'][str(event['id'])] = event
         state['page'] += 1
@@ -125,14 +135,14 @@ def collect(folder, fetch, *, resume=False, lookback_days=14):
             r.validate_players(event, entries)
             state['matches'][eid] = dict(checksum=checksum, players=entries)
         save(path, state)
-        print(f"2026: {len(state['matches'])}/{len(state['events'])}", flush=True)
-    frame = validate(state)
+        print(f"{league.key} {league.season}: {len(state['matches'])}/{len(state['events'])}", flush=True)
+    frame = validate(state, league=league)
     state.pop('cache', None)
     save(path, state)
     return state, frame
 
 
-def bootstrap(source, folder):
+def bootstrap(source, folder, *, league=DEFAULT_LEAGUE):
     """Adopt the already downloaded raw season after checking every manifest hash."""
     source, folder = Path(source), Path(folder)
     if (folder / 'candidate.json').exists():
@@ -149,10 +159,11 @@ def bootstrap(source, folder):
     required = {'events.json'} | {f'matches/{eid}/{name}.json' for eid in events for name in ('lineups', 'incidents')}
     if not required <= set(manifest):
         raise ValueError('Unverified raw files')
-    state = dict(version=1, season_id=SEASON_ID, cutoff=r.now(), calendar_complete=True,
+    state = dict(version=1, season_id=league.season_id, tournament_id=league.tournament_id,
+                 league_key=league.key, scope=league.scope, cutoff=r.now(), calendar_complete=True,
                  events=events, matches={})
     for eid, event in events.items():
-        validate_event(event)
+        validate_event(event, league=league)
         def fetch(url, **kwargs):
             if '/player/' in url:
                 return None
@@ -163,22 +174,24 @@ def bootstrap(source, folder):
         entries, _ = r.scraper.process_finished_event(None, event, delay_lineup=0,
             delay_fallback=0, delay_incidents=0, fetcher=fetch)
         state['matches'][eid] = dict(checksum=r.scraper.compute_event_checksum(event), players=entries)
-    validate(state)
+    validate(state, league=league)
     # Bootstrap is cache only: a fresh calendar must be collected before publishing.
     state['bootstrap_only'] = True
     save(folder / 'candidate.json', state)
     return len(events)
 
 
-def guard_existing(conn, state):
+def guard_existing(conn, state, *, league=DEFAULT_LEAGUE):
+    validate_scope(state, league)
+    params = (league.country, league.division, league.competition, league.season)
     rows = conn.execute("""SELECT event_id FROM sofascore_event_ingestion
-        WHERE country='cl' AND division='primera' AND competition=%s AND season=2026
-        AND processing_status='processed'""", (r.COMPETITION,)).fetchall()
+        WHERE country=%s AND division=%s AND competition=%s AND season=%s
+        AND processing_status='processed'""", params).fetchall()
     if not {str(row[0]) for row in rows} <= set(state['events']):
         raise ValueError('Candidate omits already published events')
     latest = conn.execute("""SELECT max(scraped_at) FROM sofascore_event_ingestion
-        WHERE country='cl' AND division='primera' AND competition=%s AND season=2026
-        AND processing_status='processed'""", (r.COMPETITION,)).fetchone()[0]
+        WHERE country=%s AND division=%s AND competition=%s AND season=%s
+        AND processing_status='processed'""", params).fetchone()[0]
     # The existing migration stores scraped_at as timestamp without time zone.
     if latest and latest.tzinfo is None:
         latest = latest.replace(tzinfo=timezone.utc)
@@ -186,7 +199,7 @@ def guard_existing(conn, state):
         raise ValueError('A newer publication exists; collect again')
 
 
-def publish(folder, *, apply=False):
+def publish(folder, *, apply=False, league=DEFAULT_LEAGUE):
     import os
     from psycopg import sql
     from scouting.db import get_connection
@@ -198,11 +211,12 @@ def publish(folder, *, apply=False):
     state = read(folder / 'candidate.json')
     if state.get('bootstrap_only'):
         raise ValueError('Collect a fresh calendar after bootstrap')
-    frame = validate(state)
+    options = {} if league == DEFAULT_LEAGUE else {'league': league}
+    frame = validate(state, **options)
     digest = r.digest(state)
     with get_connection() as conn:
         conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
-        guard_existing(conn, state)
+        guard_existing(conn, state, **options)
         if not apply:
             return dict(dry_run=True, matches=len(state['events']), players=len(frame))
         # Portable data-only logical snapshot; no credentials, kept on private disk.
@@ -216,17 +230,20 @@ def publish(folder, *, apply=False):
         r.atomic_write(backup_path, gzip.compress(json.dumps(backup, default=str).encode()))
     def hook(conn, batch_id):
         # Recheck under importer's scope advisory lock, before transaction commit.
-        guard_existing(conn, state)
+        guard_existing(conn, state, **options)
         for eid, event in state['events'].items():
-            upsert_event(conn, **{**SCOPE, 'season': 2026}, event_id=int(eid),
+            upsert_event(conn, **{**league.scope, 'season': int(league.season)}, event_id=int(eid),
                 home_team=event['homeTeam']['name'], away_team=event['awayTeam']['name'],
                 event_date=r.scraper.event_datetime_utc(event), status='finished', has_lineups=True,
                 checksum=state['matches'][eid]['checksum'], processing_status='processed',
                 scraped_at=datetime.fromisoformat(state['cutoff']).astimezone(timezone.utc).replace(tzinfo=None),
                 import_batch_id=batch_id, commit=False)
     with get_connection() as conn:
-        batch, stats = import_dataframe(conn, frame, **SCOPE, source_file='manual-sync:'+digest,
-                                       replace=True, publication_hook=hook)
+        identity_options = {} if league.allow_name_match else {'allow_name_match': False}
+        batch, stats = import_dataframe(conn, frame, **league.scope, source_file='manual-sync:'+league.key+':'+digest,
+                                       replace=True, publication_hook=hook, **identity_options)
     result = dict(batch_id=str(batch), metrics=stats['metrics_inserted'], matches=len(state['events']), backup=str(backup_path))
+    if not league.allow_name_match or stats.get('players_identity_review'):
+        result['players_pending_identity_review'] = stats.get('players_identity_review', 0)
     save(folder / 'publication.json', result)
     return result

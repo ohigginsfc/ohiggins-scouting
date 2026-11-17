@@ -66,7 +66,7 @@ def test_missed_weeks_produce_only_one_catchup_run(tmp_path):
 def test_worker_command_uses_the_shared_lock_and_bounded_weekly_publisher(tmp_path):
     command = scheduler.worker_command(tmp_path)
     assert command[:4] == ['flock', '-n', '-E', '75']
-    assert command[4] == str(tmp_path / 'weekly.lock')
+    assert command[4] == str(scheduler.SHARED_LOCK)
     assert command[-6:] == ['weekly', '--apply', '--max-requests', '240', '--seconds', '1800']
 
 
@@ -97,6 +97,7 @@ def test_success_clears_the_previous_error_type(tmp_path):
 
 
 def test_worker_completion_returns_its_exit_code(monkeypatch, tmp_path):
+    monkeypatch.setattr(scheduler, 'SHARED_LOCK', tmp_path / 'weekly.lock')
     process = MagicMock()
     process.wait.return_value = 2
     popen = MagicMock(return_value=process)
@@ -107,6 +108,7 @@ def test_worker_completion_returns_its_exit_code(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize('stopping,exit_code', [(True, 130), (False, 124)])
 def test_stop_and_watchdog_terminate_the_whole_worker_group(monkeypatch, tmp_path, stopping, exit_code):
+    monkeypatch.setattr(scheduler, 'SHARED_LOCK', tmp_path / 'weekly.lock')
     process = MagicMock(pid=12345)
     monkeypatch.setattr(scheduler.subprocess, 'Popen', lambda *a, **k: process)
     clock = iter([0, 3601])

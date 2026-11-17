@@ -30,3 +30,18 @@ services:
       options:
         max-size: "5m"
         max-file: "3"
+  scheduler-primera-b:
+    <<: *worker
+    profiles: ["primera-b"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    entrypoint: ["python", "scripts/run_scouting_scheduler.py", "--league", "cl_primera_b"]
+    environment:
+      <<: *scouting-database
+      PYTHONUNBUFFERED: "1"
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"

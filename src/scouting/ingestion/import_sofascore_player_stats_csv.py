@@ -36,6 +36,7 @@ def _resolve_player_id(
     *,
     stats: dict[str, Any],
     teams_lookup: dict[str, str] | None = None,
+    allow_name_match: bool = True,
 ) -> tuple[int, bool]:
     """
     Matching: external_id → normalized_name → create.
@@ -57,6 +58,31 @@ def _resolve_player_id(
 
     normalized = normalize_player_name(player_name)
     existing = players_repository.find_player_by_normalized_name(conn, normalized)
+    conflicting_external_id = existing and allow_name_match and any(
+        item['provider'] == PROVIDER and str(item['external_id']) != external_id
+        for item in player_external_ids_repository.get_external_ids_by_player(conn, int(existing['id'])))
+    if existing and (not allow_name_match or conflicting_external_id):
+        # New leagues must not attach statistics/reports just because two people share a name.
+        # Keep the public name intact and qualify only the internal unique lookup key.
+        key = normalized + ' | sofascore:' + external_id
+        distinct = players_repository.find_player_by_normalized_name(conn, key)
+        if distinct:
+            pid, created = int(distinct['id']), False
+        else:
+            profile = build_player_profile_updates(row)
+            pid = players_repository.create_player(
+                conn, full_name=player_name, normalized_name=key,
+                birth_date=profile.get('birth_date'), nationality=profile.get('nationality'),
+                preferred_foot=profile.get('preferred_foot'), height_cm=profile.get('height_cm'),
+                commit=False,
+            )
+            created = True
+        stat = 'players_created' if created else 'players_reused'
+        stats[stat] = stats.get(stat, 0) + 1
+        stats['players_identity_review'] = stats.get('players_identity_review', 0) + 1
+        player_external_ids_repository.create_or_update_external_id(
+            conn, pid, PROVIDER, external_id, external_name=player_name, commit=False)
+        return pid, created
     if existing:
         pid = int(existing["id"])
         stats["players_matched_name"] = stats.get("players_matched_name", 0) + 1
@@ -141,6 +167,7 @@ def import_dataframe(
     competition: str, source_file: str, replace: bool = False,
     teams_lookup: dict[str, str] | None = None,
     publication_hook=None,
+    allow_name_match: bool = True,
 ) -> tuple[UUID, dict[str, Any]]:
     """Publish the complete CSV atomically; retain the previous version on any error.
 
@@ -186,7 +213,8 @@ def import_dataframe(
             metric_buffer = []
             for idx, row in df.iterrows():
                 try:
-                    player_id, _ = _resolve_player_id(conn, row, stats=run_stats, teams_lookup=teams_lookup)
+                    player_id, _ = _resolve_player_id(conn, row, stats=run_stats, teams_lookup=teams_lookup,
+                                                    allow_name_match=allow_name_match)
                     _apply_profile_merge(conn, player_id, row, teams_lookup=teams_lookup)
                     metrics = convert_row_to_metrics(row, season=season, competition=competition, teams_lookup=teams_lookup)
                     if not metrics:

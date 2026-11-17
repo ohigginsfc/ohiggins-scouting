@@ -94,6 +94,8 @@ se conservan; no necesitan una descarga completa cada semana.
 
 ## Requisitos
 
+La [guía de cobertura de scouting](docs/cobertura-scouting.md) describe Primera B Chile 2026, su carga y actualización semanal, la separación de identidades y la medición de espacio antes/después de ampliar ligas.
+
 - Docker
 - Docker Compose v2
 
