@@ -27,7 +27,7 @@ LOGO_PATH = os.path.join(os.path.dirname(__file__), "assets", "OHigginsFC.png")
 from scouting.comet import queries, yearly
 from scouting.comet.categories import DEFAULT_LADDER_CAPS, SENIOR_LABEL, age_category_case_sql
 from scouting.portal.security import admin_only, require_admin
-from ui.comet_widgets import FMT_INT, show_table, year_filter
+from ui.comet_widgets import FMT_1, FMT_2, FMT_INT, show_table, year_filter
 
 # Secciones del club (Pablo, 13-10-2026): sub-20, sub-18, sub-16, sub-15, sub-14, sub-13, sub-12 «y así».
 YOUTH_CATEGORIES = [f"U-{cap}" for cap in DEFAULT_LADDER_CAPS]
@@ -464,10 +464,10 @@ def page_executive_summary():
 
         col1, col2 = st.columns([1, 2])
         with col1:
-            st.dataframe(
+            show_table(
                 age_dist,
-                hide_index=True,
-                use_container_width=True,
+                {"Categoría": ("Categoría", None), "Jugadores": ("Jugadores", FMT_INT)},
+                name="Plantel por categoría",
             )
         with col2:
             fig = px.bar(
@@ -573,17 +573,15 @@ def page_youth_development():
                 )
                 st.plotly_chart(fig, use_container_width=True)
             with col2:
-                st.dataframe(
-                    top_scorers[["displayname", "age", "goals", "matches"]].rename(
-                        columns={
-                            "displayname": "Jugador",
-                            "age": "Edad",
-                            "goals": "Goles",
-                            "matches": "Partidos",
-                        }
-                    ),
-                    hide_index=True,
-                    use_container_width=True,
+                show_table(
+                    top_scorers,
+                    {
+                        "displayname": ("Jugador", None),
+                        "age": ("Edad", FMT_INT),
+                        "goals": ("Goles", FMT_INT),
+                        "matches": ("Partidos", FMT_INT),
+                    },
+                    name=f"Goleadores · {selected_cat} {period}",
                 )
             st.markdown("**Goles por año de estos jugadores**")
             by_scorer = yearly.goals_by_year(stats_by_year, top_scorers)
@@ -591,7 +589,7 @@ def page_youth_development():
                 "displayname": ("Jugador", None),
                 **{col: (col, FMT_INT) for col in yearly.year_columns(by_scorer)},
                 "Total": ("Total", FMT_INT),
-            })
+            }, name=f"Goles por año de los goleadores · {selected_cat}")
             st.caption(
                 "Cada columna es un año de temporada. «—» es un año en que el jugador no tiene partidos en esta categoría."
             )
@@ -627,35 +625,20 @@ def page_youth_development():
         if filtered_stats.empty:
             st.info("Ningún jugador cumple el filtro.")
             return
-        display_df = filtered_stats[
-            [
-                "displayname",
-                "age",
-                "matches",
-                "minutes",
-                "starts",
-                "goals",
-                "goals_per90",
-                "yellow_cards",
-                "red_cards",
-            ]
-        ].rename(
-            columns={
-                "displayname": "Jugador",
-                "age": "Edad",
-                "matches": "Partidos",
-                "minutes": "Minutos",
-                "starts": "Partidos como titular",
-                "goals": "Goles",
-                "goals_per90": "Goles/90",
-                "yellow_cards": "Tarjetas amarillas",
-                "red_cards": "Tarjetas rojas",
-            }
-        )
-        st.dataframe(
-            display_df,
-            hide_index=True,
-            use_container_width=True,
+        show_table(
+            filtered_stats,
+            {
+                "displayname": ("Jugador", None),
+                "age": ("Edad", FMT_INT),
+                "matches": ("Partidos", FMT_INT),
+                "minutes": ("Minutos", FMT_INT),
+                "starts": ("Partidos como titular", FMT_INT),
+                "goals": ("Goles", FMT_INT),
+                "goals_per90": ("Goles/90", FMT_2),
+                "yellow_cards": ("Tarjetas amarillas", FMT_INT),
+                "red_cards": ("Tarjetas rojas", FMT_INT),
+            },
+            name=f"Rendimiento global · {selected_cat} {period}",
         )
 
 
@@ -714,40 +697,22 @@ def page_competition_performance():
     st.markdown("---")
     st.subheader("📋 Tabla de posiciones por competición")
 
-    display_standings = standings[
-        [
-            "competition_name",
-            "position",
-            "matches",
-            "wins",
-            "draws",
-            "losses",
-            "points",
-            "efectividad",
-            "goalsfor",
-            "goalsagainst",
-            "goaldifference",
-        ]
-    ].rename(
-        columns={
-            "competition_name": "Competición",
-            "position": "Posición",
-            "matches": "Partidos jugados",
-            "wins": "Partidos ganados",
-            "draws": "Empates",
-            "losses": "Derrotas",
-            "points": "Puntos",
-            "efectividad": "Efectividad (%)",
-            "goalsfor": "Goles a favor",
-            "goalsagainst": "Goles en contra",
-            "goaldifference": "Diferencia de gol",
-        }
-    )
-
-    st.dataframe(
-        display_standings,
-        hide_index=True,
-        use_container_width=True,
+    show_table(
+        standings,
+        {
+            "competition_name": ("Competición", None),
+            "position": ("Posición", FMT_INT),
+            "matches": ("Partidos jugados", FMT_INT),
+            "wins": ("Partidos ganados", FMT_INT),
+            "draws": ("Empates", FMT_INT),
+            "losses": ("Derrotas", FMT_INT),
+            "points": ("Puntos", FMT_INT),
+            "efectividad": ("Efectividad (%)", FMT_1),
+            "goalsfor": ("Goles a favor", FMT_INT),
+            "goalsagainst": ("Goles en contra", FMT_INT),
+            "goaldifference": ("Diferencia de gol", FMT_INT),
+        },
+        name=f"Posiciones por competición · {selected_cat} {yearly.label(year)}",
     )
 
     st.markdown("---")
@@ -882,40 +847,22 @@ def page_player_analysis():
 
         st.subheader(f"📊 Jugadores de Campo ({len(filtered)} jugadores · {yearly.label(year)})")
 
-        display_df = filtered[
-            [
-                "displayname",
-                "age",
-                "category",
-                "nationality",
-                "matches",
-                "minutes",
-                "starts",
-                "goals",
-                "goals_per90",
-                "yellow_cards",
-                "red_cards",
-            ]
-        ].rename(
-            columns={
-                "displayname": "Jugador",
-                "age": "Edad",
-                "category": "Categoría",
-                "nationality": "País",
-                "matches": "Partidos jugados",
-                "minutes": "Minutos jugados",
-                "starts": "Partidos como titular",
-                "goals": "Goles",
-                "goals_per90": "Goles/90",
-                "yellow_cards": "Tarjetas amarillas",
-                "red_cards": "Tarjetas rojas",
-            }
-        )
-
-        st.dataframe(
-            display_df,
-            hide_index=True,
-            use_container_width=True,
+        show_table(
+            filtered,
+            {
+                "displayname": ("Jugador", None),
+                "age": ("Edad", FMT_INT),
+                "category": ("Categoría", None),
+                "nationality": ("País", None),
+                "matches": ("Partidos jugados", FMT_INT),
+                "minutes": ("Minutos jugados", FMT_INT),
+                "starts": ("Partidos como titular", FMT_INT),
+                "goals": ("Goles", FMT_INT),
+                "goals_per90": ("Goles/90", FMT_2),
+                "yellow_cards": ("Tarjetas amarillas", FMT_INT),
+                "red_cards": ("Tarjetas rojas", FMT_INT),
+            },
+            name=f"Jugadores de campo · {selected_cat} {yearly.label(year)}",
         )
 
         with st.expander("Goles por año de estos jugadores"):
@@ -925,7 +872,7 @@ def page_player_analysis():
                 "category": ("Categoría", None),
                 **{col: (col, FMT_INT) for col in yearly.year_columns(by_player)},
                 "Total": ("Total", FMT_INT),
-            })
+            }, name=f"Goles por año de los jugadores · {selected_cat} {yearly.label(year)}")
             st.caption(
                 "Cada columna es un año de temporada. «—» es un año en que el jugador no tiene partidos en esa categoría."
             )
@@ -985,36 +932,20 @@ def page_player_analysis():
 
         st.subheader(f"🥅 Arqueros ({len(gk_stats)} arqueros · {yearly.label(year)})")
 
-        display_df = gk_stats[
-            [
-                "displayname",
-                "age",
-                "category",
-                "matches",
-                "minutes",
-                "goals_conceded",
-                "gc_per90",
-                "clean_sheets",
-                "clean_sheet_pct",
-            ]
-        ].rename(
-            columns={
-                "displayname": "Arquero",
-                "age": "Edad",
-                "category": "Categoría",
-                "matches": "Partidos jugados",
-                "minutes": "Minutos jugados",
-                "goals_conceded": "Goles recibidos",
-                "gc_per90": "Goles recibidos/90",
-                "clean_sheets": "Vallas invictas",
-                "clean_sheet_pct": "% vallas invictas",
-            }
-        )
-
-        st.dataframe(
-            display_df,
-            hide_index=True,
-            use_container_width=True,
+        show_table(
+            gk_stats,
+            {
+                "displayname": ("Arquero", None),
+                "age": ("Edad", FMT_INT),
+                "category": ("Categoría", None),
+                "matches": ("Partidos jugados", FMT_INT),
+                "minutes": ("Minutos jugados", FMT_INT),
+                "goals_conceded": ("Goles recibidos", FMT_INT),
+                "gc_per90": ("Goles recibidos/90", FMT_2),
+                "clean_sheets": ("Vallas invictas", FMT_INT),
+                "clean_sheet_pct": ("% vallas invictas", FMT_1),
+            },
+            name=f"Arqueros · {selected_cat} {yearly.label(year)}",
         )
 
         st.markdown("---")
@@ -1221,11 +1152,10 @@ def page_squad_structure():
         rename["level"] = "Nivel"
 
     if cols:
-        display_squad = filtered_squad[cols].rename(columns=rename)
-        st.dataframe(
-            display_squad,
-            hide_index=True,
-            use_container_width=True,
+        show_table(
+            filtered_squad,
+            {column: (rename[column], FMT_INT if column == "age" else None) for column in cols},
+            name="Plantel vigente" + ("" if cat_filter == "Todas" else f" · {cat_filter}"),
         )
         st.caption(f"Mostrando {len(filtered_squad)} de {len(squad)} jugadores vigentes.")
     else:

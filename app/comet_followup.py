@@ -52,7 +52,12 @@ def _match_title(m) -> str:
             f'({m.venue}) · {_score(m)} {_result_text(m)}')
 
 
-def _sheet_table(ctx: Context, rows: pd.DataFrame, match) -> None:
+def _match_table_name(label: str, match) -> str:
+    """Nombre de una tabla de la planilla: sale en el nombre del archivo de Excel, con el partido al que pertenece."""
+    return f'{label} · {match.matchdate:%d-%m-%Y} {match.category} vs {_label(match.rival, "rival sin nombre")}'
+
+
+def _sheet_table(ctx: Context, rows: pd.DataFrame, match, label: str) -> None:
     """Planilla con el marcador real a la entrada y salida, separado del final."""
     rows = events.attach_results(rows, ctx.computed.onpitch).assign(displayname=lambda d: d['displayname'].map(_label))
     show_table(rows, {
@@ -64,7 +69,7 @@ def _sheet_table(ctx: Context, rows: pd.DataFrame, match) -> None:
         'onpitch_score_exit': ('Marcador al salir', None), 'onpitch_state_exit': ('Al salir', None),
         'onpitch_changed': ('¿Cambió el resultado?', None),
         'onpitch_for': ('Goles a favor en cancha', FMT_INT), 'onpitch_against': ('Goles en contra en cancha', FMT_INT),
-        'onpitch_status': ('Cronología', None)})
+        'onpitch_status': ('Cronología', None)}, name=_match_table_name(label, match))
 
 
 def render_match(ctx: Context, matchid: str) -> None:
@@ -91,9 +96,9 @@ def render_match(ctx: Context, matchid: str) -> None:
     left, right = st.columns(2, gap='large')
     with left:
         st.markdown(f'**Titulares** ({int((sheet["role"] == ROLE_STARTER).sum())})')
-        _sheet_table(ctx, sheet[sheet['role'] == ROLE_STARTER], match)
+        _sheet_table(ctx, sheet[sheet['role'] == ROLE_STARTER], match, 'Titulares')
         st.markdown(f'**Suplentes que ingresaron** ({int((sheet["role"] == ROLE_SUB_IN).sum())})')
-        _sheet_table(ctx, sheet[sheet['role'] == ROLE_SUB_IN], match)
+        _sheet_table(ctx, sheet[sheet['role'] == ROLE_SUB_IN], match, 'Suplentes que ingresaron')
     with right:
         outs = sheet[sheet['role'] == ROLE_SUB_OUT]
         st.markdown(f'**Suplentes que no ingresaron** ({len(outs)})')
@@ -102,19 +107,22 @@ def render_match(ctx: Context, matchid: str) -> None:
         else:
             show_table(outs.assign(displayname=outs['displayname'].map(_label)),
                        {'displayname': ('Jugador', None), 'age': ('Edad', FMT_INT),
-                        'yellow_cards': ('Amarillas', FMT_INT), 'red_cards': ('Rojas', FMT_INT)})
+                        'yellow_cards': ('Amarillas', FMT_INT), 'red_cards': ('Rojas', FMT_INT)},
+                       name=_match_table_name('Suplentes que no ingresaron', match))
         unknown = sheet[sheet['role'] == ROLE_UNKNOWN]
         if len(unknown):
             st.markdown(f'**Sin dato de titular o suplente** ({len(unknown)})')
             show_table(unknown.assign(displayname=unknown['displayname'].map(_label)),
-                       {'displayname': ('Jugador', None), 'minutes': ('Minutos', FMT_INT)})
+                       {'displayname': ('Jugador', None), 'minutes': ('Minutos', FMT_INT)},
+                       name=_match_table_name('Sin dato de titular o suplente', match))
         absent = metrics.not_called_reference(ds, matchid)
         st.markdown(f'**No citados que no participaron** ({len(absent)}) · referencial')
         if absent.empty:
             st.caption('Nadie más figura en las planillas de esta competición.')
         else:
             show_table(absent.assign(displayname=absent['displayname'].map(_label)),
-                       {'displayname': ('Jugador', None), 'citaciones': ('Citaciones en la competición', FMT_INT)})
+                       {'displayname': ('Jugador', None), 'citaciones': ('Citaciones en la competición', FMT_INT)},
+                       name=_match_table_name('No citados que no participaron', match))
         keepers = metrics.goalkeeper_conceded(ds, matchid)
         st.markdown('**Goles recibidos por arquero**')
         if keepers.empty:
@@ -122,7 +130,8 @@ def render_match(ctx: Context, matchid: str) -> None:
         else:
             show_table(keepers.assign(displayname=keepers['displayname'].map(_label)),
                        {'displayname': ('Arquero', None), 'minutesplayed': ('Minutos', FMT_INT),
-                        'goalsconceded': ('Goles recibidos', FMT_INT)})
+                        'goalsconceded': ('Goles recibidos', FMT_INT)},
+                       name=_match_table_name('Goles recibidos por arquero', match))
 
 
 @admin_only
@@ -163,7 +172,8 @@ def page_weekly_match() -> None:
                            rival=scope['rival'].map(lambda r: _label(r, 'rival sin nombre')))
     show_table(summary, {'fecha': ('Fecha', None), 'category': ('Categoría', None), 'competition': ('Competición', None),
                          'rival': ('Rival', None), 'venue': ('Local / Visita', None), 'marcador': ('Marcador', None),
-                         'resultado': ('Resultado', None)}, colors=('resultado', RESULT_COLORS))
+                         'resultado': ('Resultado', None)}, colors=('resultado', RESULT_COLORS),
+               name=f'Partidos de la semana · {pd.Timestamp(week):%d-%m-%Y}')
     st.markdown('---')
     ids = scope['matchid'].tolist()
     by_id = {m.matchid: m for m in scope.itertuples()}
@@ -240,7 +250,7 @@ def page_rankings() -> None:
         columns = {'position': ('Pos.', FMT_INT), 'displayname': ('Jugador', None), 'age': ('Edad', FMT_INT),
                    'played': ('Partidos jugados', FMT_INT), value: (label, FMT_INT)}
         columns.update(extra)
-        show_table(ranked, columns)
+        show_table(ranked, columns, name=f'Ranking {metric} · {category} {season}')
         if chart:
             _bar(ranked, value, label)
 
@@ -306,7 +316,8 @@ def _marks_panel(ctx: Context, personid: str) -> None:
                 st.error(str(exc))
     if len(periods):
         show_table(periods.assign(kind=periods['kind'].map(config_store.PERIOD_KINDS)),
-                   {'kind': ('Período', None), 'starts_on': ('Desde', None), 'ends_on': ('Hasta', None), 'note': ('Nota', None)})
+                   {'kind': ('Período', None), 'starts_on': ('Desde', None), 'ends_on': ('Hasta', None), 'note': ('Nota', None)},
+                   name=f'Períodos de selección · {comet_matchlog.player_name(ctx, personid)}')
         retire = st.selectbox('Retirar un período', [None] + periods['id'].astype(int).tolist(), key=f'retire_{personid}',
                               format_func=lambda i: 'Elegir…' if i is None else
                               f'{config_store.PERIOD_KINDS[periods.loc[periods.id == i, "kind"].iloc[0]]} · '
@@ -414,7 +425,7 @@ def page_player() -> None:
             'red_cards': ('Rojas', FMT_INT), 'own_goals': ('Autogoles', FMT_INT),
             'possible_minutes': ('Minutos posibles', FMT_INT), 'participation_pct': ('Participación', FMT_PCT),
             'wins_with': ('Victorias finales en partidos jugados', FMT_INT), 'win_pct_with': ('% victorias finales', FMT_PCT),
-            'incomplete': ('Partidos con datos contradictorios', FMT_INT)})
+            'incomplete': ('Partidos con datos contradictorios', FMT_INT)}, name=f'Historial · {name}')
     with tabs[1]:
         by_season = facts.groupby('season_year', as_index=False).agg(
             age=('age', 'first'), age_category=('age_category', 'first'),
@@ -427,7 +438,8 @@ def page_player() -> None:
         show_table(by_season, {'season_year': ('Temporada', '{:.0f}'), 'age': ('Edad al corte', FMT_INT),
                                'age_category': ('Categoría por edad', None), 'category': ('Categoría en que juega', None),
                                'adelantado': ('Categorías por encima de su edad', None),
-                               'ahead_minutes': ('Minutos en categoría superior', FMT_INT)})
+                               'ahead_minutes': ('Minutos en categoría superior', FMT_INT)},
+                   name=f'Categoría vs edad · {name}')
         st.caption('La categoría en que juega es donde sumó más minutos esa temporada. La edad se mide en la fecha de '
                    'corte de la regla «Fecha de corte de edad» (por defecto, el 31 de diciembre del año de la temporada).')
     with tabs[2]:
