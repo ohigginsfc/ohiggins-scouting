@@ -166,8 +166,8 @@ def screen(monkeypatch):
 
 
 def shown(row, columns):
-    '''Celdas como se ven: una columna con datos ausentes se muestra como texto («—»); si no, como número.'''
-    return [v if isinstance(v, str) else str(int(v)) for v in row[columns]]
+    '''Celdas como se ven: Styler muestra «—» sin convertir los números en texto.'''
+    return ['—' if pd.isna(v) else v if isinstance(v, str) else str(int(v)) for v in row[columns]]
 
 
 def youth(app):

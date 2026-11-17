@@ -70,7 +70,7 @@ def page_indicators() -> None:
             'antiguedad_promedio': ('Antigüedad promedio (años, datefrom)' if seniority_from_profile
                                    else 'Antigüedad promedio (años, mínimo)', FMT_1),
             'participacion_pct': ('Participación (% de minutos posibles)', FMT_PCT), 'minutos_totales': ('Minutos totales de la serie', FMT_INT),
-            'filas_contradictorias': ('Filas contradictorias', FMT_INT)})
+            'filas_contradictorias': ('Filas contradictorias', FMT_INT)}, name=f'Indicadores por categoría · temporada {season}')
         if int(ind['filas_contradictorias'].sum()):
             st.caption('Las filas contradictorias (repetidas con valores distintos) no se suman: los totales de esas series '
                        'están incompletos. Detalle en Seguimiento y configuración → Calidad de datos.')
@@ -114,7 +114,8 @@ def page_indicators() -> None:
             'category': ('Categoría', None), 'minutos_totales': ('Minutos totales de la serie', FMT_INT),
             'min_tope_o_mayor': ('Edad tope o mayor', FMT_INT), 'min_menor_1': ('1 año menor', FMT_INT),
             'min_menor_2': ('2 años menores', FMT_INT), 'min_menor_3': ('3 años menores', FMT_INT),
-            'min_menor_4_o_mas': ('4 o más años menores', FMT_INT), 'pct_menores': ('% de minutos de menores', FMT_PCT)})
+            'min_menor_4_o_mas': ('4 o más años menores', FMT_INT), 'pct_menores': ('% de minutos de menores', FMT_PCT)},
+            name=f'Minutos de jugadores más chicos · temporada {season}')
         melted = younger.melt(id_vars='category', value_vars=['min_tope_o_mayor', 'min_menor_1', 'min_menor_2', 'min_menor_3',
                                                              'min_menor_4_o_mas'], var_name='grupo', value_name='minutos')
         names = {'min_tope_o_mayor': 'Edad tope o mayor', 'min_menor_1': '1 año menor', 'min_menor_2': '2 años menores',
@@ -134,12 +135,14 @@ def page_indicators() -> None:
             ['played', 'cited'], ascending=False)
         show_table(_named(roles), {'displayname': ('Jugador', None), 'cited': ('Partidos citado', FMT_INT),
                                    'started': ('Titular', FMT_INT), 'sub_in': ('Suplente que ingresó', FMT_INT),
-                                   'only_called': ('Solo citación', FMT_INT), 'played': ('Jugó', FMT_INT)})
+                                   'only_called': ('Solo citación', FMT_INT), 'played': ('Jugó', FMT_INT)},
+                   name=f'Partidos por jugador · {category} {season}')
 
     with tabs[4]:
         show_table(ind, {'category': ('Categoría', None), 'goles': ('Goles marcados', FMT_INT),
                          'goles_recibidos_arqueros': ('Goles recibidos por arqueros', FMT_INT),
-                         'amarillas': ('Amarillas', FMT_INT), 'rojas': ('Rojas', FMT_INT)})
+                         'amarillas': ('Amarillas', FMT_INT), 'rojas': ('Rojas', FMT_INT)},
+                   name=f'Disciplina y goles por categoría · temporada {season}')
         keepers = ds.goalkeepers.merge(ds.matches[['matchid', 'season_year', 'category']], on='matchid')
         keepers = keepers[(keepers['season_year'] == season) & ((keepers['played'] == True).fillna(False)  # noqa: E712
                                                                 | (keepers['minutesplayed'] > 0)).astype(bool)]
@@ -154,13 +157,13 @@ def page_indicators() -> None:
             show_table(table.sort_values('minutos', ascending=False), {
                 'displayname': ('Arquero', None), 'category': ('Categoría', None), 'partidos': ('Partidos', FMT_INT),
                 'minutos': ('Minutos', FMT_INT), 'recibidos': ('Goles recibidos', FMT_INT), 'por_90': ('Recibidos por 90', FMT_2),
-                'invictas': ('Vallas invictas', FMT_INT)})
+                'invictas': ('Vallas invictas', FMT_INT)}, name=f'Arqueros: goles recibidos · temporada {season}')
         category = st.selectbox('Categoría para ver a los jugadores', list(ind['category']), key='ci_discipline_category')
         players = cat[(cat['season_year'] == season) & (cat['category'] == category)]
         players = players[(players['yellow_cards'].fillna(0) > 0) | (players['red_cards'].fillna(0) > 0) | (players['goals'].fillna(0) > 0)]
         show_table(_named(players.sort_values(['yellow_cards', 'goals'], ascending=False)), {
             'displayname': ('Jugador', None), 'goals': ('Goles', FMT_INT), 'yellow_cards': ('Amarillas', FMT_INT),
-            'red_cards': ('Rojas', FMT_INT), 'minutes': ('Minutos', FMT_INT)})
+            'red_cards': ('Rojas', FMT_INT), 'minutes': ('Minutos', FMT_INT)}, name=f'Disciplina y goles · {category} {season}')
 
     with tabs[5]:
         category = st.selectbox('Categoría', list(ind['category']), key='ci_part_category')
@@ -169,7 +172,8 @@ def page_indicators() -> None:
                                      'minutes': ('Minutos', FMT_INT), 'possible_minutes': ('Minutos posibles', FMT_INT),
                                      'participation_pct': ('Participación', FMT_PCT),
                                      'wins_with': ('Ganados con el jugador', FMT_INT), 'results_with': ('Con resultado', FMT_INT),
-                                     'win_pct_with': ('% victorias con el jugador', FMT_PCT)})
+                                     'win_pct_with': ('% victorias con el jugador', FMT_PCT)},
+                   name=f'Participación y victorias · {category} {season}')
         if players['participation_pct'].notna().any():
             fig = px.histogram(players.dropna(subset=['participation_pct']), x='participation_pct', nbins=10,
                                labels={'participation_pct': 'Participación (% de minutos posibles)'})
@@ -222,7 +226,8 @@ def page_alerts() -> None:
         with st.expander(f'{len(blocked)} jugador(es) no se evalúan por planillas contradictorias', expanded=False):
             st.write('COMET trae filas repetidas con valores distintos para estos jugadores y partidos; no se elige ninguna. '
                      'Sus cifras están incompletas, así que ninguna alerta los considera hasta que se aclare el dato.')
-            show_table(_named(blocked), {'displayname': ('Jugador', None), 'partidos': ('Partidos afectados', FMT_INT)})
+            show_table(_named(blocked), {'displayname': ('Jugador', None), 'partidos': ('Partidos afectados', FMT_INT)},
+                       name=f'Jugadores con planillas contradictorias · temporada {season}')
     no_minutes = ds.minutes_gap_players(season)
     if len(no_minutes):
         with st.expander(f'{len(no_minutes)} jugador(es) sin minutos completos: no se evalúa su participación', expanded=False):
@@ -230,7 +235,8 @@ def page_alerts() -> None:
                      'los minutos). La alerta de baja participación no se calcula con una suma parcial; las demás alertas '
                      'basadas en tarjetas y participación confirmada en categorías superiores siguen evaluándose. '
                      'La categoría principal y la racha sin promoción no se infieren de minutos incompletos.')
-            show_table(_named(no_minutes), {'displayname': ('Jugador', None), 'partidos': ('Partidos sin minutos', FMT_INT)})
+            show_table(_named(no_minutes), {'displayname': ('Jugador', None), 'partidos': ('Partidos sin minutos', FMT_INT)},
+                       name=f'Jugadores sin minutos completos · temporada {season}')
     if found.empty:
         st.success('No hay alertas activas con la configuración actual.')
         return
@@ -246,7 +252,8 @@ def page_alerts() -> None:
     view = _named(view).assign(marca=view['personid'].map(marks))
     show_table(view, {'alert': ('Alerta', None), 'displayname': ('Jugador', None), 'category': ('Categoría', None),
                       'detail': ('Detalle', None), 'marca': ('Marca del club', None)}, colors=('alert', {
-                          alert_rules.alert_label(d.key, ctx.rules): ctx.alert_config[d.key]['color'] for d in alert_rules.ALERT_DEFS}))
+                          alert_rules.alert_label(d.key, ctx.rules): ctx.alert_config[d.key]['color'] for d in alert_rules.ALERT_DEFS}),
+               name=f'Alertas · temporada {season}')
     st.caption('El color de cada alerta se acompaña siempre de su nombre. Se configura en Seguimiento y configuración.')
 
 
@@ -291,11 +298,13 @@ def page_adelantados() -> None:
                 'displayname': ('Jugador', None), 'age': ('Edad al corte', FMT_INT), 'age_category': ('Le corresponde', None),
                 'plays_in': ('Juega en', None), 'steps': ('Categorías por encima', FMT_INT),
                 'ahead_minutes': ('Minutos en la superior', FMT_INT), 'total_minutes': ('Minutos totales', FMT_INT),
-                'ahead_share_pct': ('% de sus minutos arriba', FMT_PCT), 'ahead_matches': ('Partidos arriba', FMT_INT)})
+                'ahead_share_pct': ('% de sus minutos arriba', FMT_PCT), 'ahead_matches': ('Partidos arriba', FMT_INT)},
+                name=f'Jugadores adelantados · temporada {season}')
     with tabs[1]:
         show_table(share, {'category': ('Categoría en que juegan', None), 'jugadores': ('Jugadores con minutos', FMT_INT),
                            'adelantados': ('Adelantados', FMT_INT), 'pct_adelantados': ('% de adelantados', FMT_PCT),
-                           'minutos': ('Minutos de la categoría', FMT_INT), 'minutos_adelantados': ('Minutos de adelantados', FMT_INT)})
+                           'minutos': ('Minutos de la categoría', FMT_INT), 'minutos_adelantados': ('Minutos de adelantados', FMT_INT)},
+                   name=f'Adelantados por categoría · temporada {season}')
         fig = px.bar(share, x='category', y='pct_adelantados', text='pct_adelantados',
                      labels={'category': '', 'pct_adelantados': '% de adelantados'})
         fig.update_traces(marker_color=OHIGGINS_BLUE, texttemplate='%{text:.1f} %', textposition='outside')
@@ -318,7 +327,8 @@ def page_adelantados() -> None:
             show_table(_named(summary.assign(first_date=summary['first_date'].dt.strftime('%d-%m-%Y'))), {
                 'displayname': ('Jugador', None), 'plays_in': ('Juega en', None), 'months_active': ('Meses con minutos arriba', FMT_INT),
                 'first_date': ('Primera participación arriba', None), 'matches_in_series': ('Partidos de la serie desde entonces', FMT_INT),
-                'called': ('Citado', FMT_INT), 'called_pct': ('% citado', FMT_PCT), 'played': ('Jugó', FMT_INT), 'played_pct': ('% jugó', FMT_PCT)})
+                'called': ('Citado', FMT_INT), 'called_pct': ('% citado', FMT_PCT), 'played': ('Jugó', FMT_INT), 'played_pct': ('% jugó', FMT_PCT)},
+                name=f'Permanencia de los adelantados · temporada {season}')
     with tabs[3]:
         compare = adelantados.ahead_vs_peers(ds, ctx.computed.cat, season)
         if compare.empty:
@@ -328,7 +338,8 @@ def page_adelantados() -> None:
                                  'jugadores': ('Jugadores', FMT_INT), 'partidos_jugados': ('Partidos jugados', FMT_INT),
                                  'minutos_por_partido': ('Minutos por partido', FMT_1), 'goles_por_90': ('Goles por 90', FMT_2),
                                  'amarillas_por_90': ('Amarillas por 90', FMT_2), 'participacion_pct': ('Participación', FMT_PCT),
-                                 'victorias_pct': ('% victorias con el jugador', FMT_PCT)})
+                                 'victorias_pct': ('% victorias con el jugador', FMT_PCT)},
+                       name=f'Adelantados y su grupo de edad · temporada {season}')
             st.caption('“Adelantados” son los jugadores de esa edad con minutos en una categoría superior (sus cifras allí); '
                        '“Grupo de edad” son los que juegan en la categoría que les corresponde. Con pocos jugadores la '
                        'comparación es solo orientativa: mira la columna Jugadores.')
@@ -467,7 +478,8 @@ def _tab_marks(ctx: Context) -> None:
         st.caption('Aún no hay jugadores proyectados ni de selección. Se marcan desde la Ficha del jugador.')
     else:
         view = marks.assign(displayname=marks['personid'].map(names).map(_label), mark=marks['mark'].map(config_store.MARKS))
-        show_table(view, {'displayname': ('Jugador', None), 'mark': ('Marca', None), 'note': ('Nota', None), 'updated_at': ('Actualizada', None)})
+        show_table(view, {'displayname': ('Jugador', None), 'mark': ('Marca', None), 'note': ('Nota', None), 'updated_at': ('Actualizada', None)},
+                   name='Jugadores marcados')
     periods = ctx.periods[ctx.periods['active'].astype(bool)] if len(ctx.periods) else ctx.periods
     st.markdown('**Períodos de selección**')
     if periods.empty:
@@ -475,7 +487,7 @@ def _tab_marks(ctx: Context) -> None:
     else:
         view = periods.assign(displayname=periods['personid'].map(names).map(_label), kind=periods['kind'].map(config_store.PERIOD_KINDS))
         show_table(view, {'displayname': ('Jugador', None), 'kind': ('Período', None), 'starts_on': ('Desde', None),
-                          'ends_on': ('Hasta', None), 'note': ('Nota', None)})
+                          'ends_on': ('Hasta', None), 'note': ('Nota', None)}, name='Períodos de selección')
     st.caption('Los períodos solo se muestran, salvo que la regla “excluir períodos de selección” esté activada: '
                'entonces esos partidos se descuentan de los minutos posibles del jugador.')
 
@@ -514,7 +526,7 @@ def _tab_quality(ctx: Context) -> None:
     table = ctx.computed.quality
     show_static_table(table, {'control': ('Control', None), 'nivel': ('Estado', None), 'cantidad': ('Cantidad', None),
                               'detalle': ('Qué revisa', None), 'efecto': ('Efecto en las cifras', None)},
-                      colors=('nivel', QUALITY_COLORS))
+                      colors=('nivel', QUALITY_COLORS), name='Calidad de datos')
     horizon = quality.history_horizon(ctx.ds)
     if horizon['first'] is not None:
         st.caption(f'Datos disponibles desde {horizon["first"]:%d-%m-%Y} hasta {horizon["last"]:%d-%m-%Y} '
@@ -526,13 +538,14 @@ def _tab_quality(ctx: Context) -> None:
                    'hasta que COMET indique cuál fila vale (identificadores tal como están en COMET).')
         show_table(dups.sort_values(['resolucion', 'tabla']).head(200), {
             'tabla': ('Tabla', None), 'matchid': ('Partido', None), 'personid': ('Jugador (id)', None),
-            'filas': ('Filas', FMT_INT), 'versiones': ('Versiones distintas', FMT_INT), 'resolucion': ('Resolución', None)})
+            'filas': ('Filas', FMT_INT), 'versiones': ('Versiones distintas', FMT_INT), 'resolucion': ('Resolución', None)},
+            name='Filas repetidas por jugador y partido')
     st.markdown('**Datos de COMET: qué se usa, qué hay que confirmar y qué falta**')
     st.caption('No se modifica dataProject ni se conceden permisos desde este repositorio. «Existe» significa que la columna '
                'o tabla se comprobó en la lectura de COMET; un dato sin acceso no es un dato ausente.')
     show_static_table(pd.DataFrame(PIPELINE_DEPENDENCIES), {
         'dato': ('Dato', None), 'estado': ('Estado', None), 'para': ('Para qué se necesita', None),
-        'hoy': ('Qué se hace hoy', None)})
+        'hoy': ('Qué se hace hoy', None)}, name='Datos de COMET · dependencias')
 
 
 @admin_only
