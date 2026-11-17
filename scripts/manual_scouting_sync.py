@@ -10,7 +10,7 @@ from scouting import manual_sync as sync
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['probe', 'bootstrap', 'collect', 'validate', 'publish'])
+    parser.add_argument('command', choices=['probe', 'bootstrap', 'collect', 'validate', 'publish', 'weekly'])
     parser.add_argument('--folder', type=Path, default=Path('data/recovery/manual-2026'))
     parser.add_argument('--source', type=Path)
     parser.add_argument('--resume', action='store_true')
@@ -28,13 +28,20 @@ def main(argv=None):
         if not args.source:
             parser.error('bootstrap requires --source')
         print(json.dumps({'cached_matches': sync.bootstrap(args.source, args.folder)}))
-    elif args.command in ('probe', 'collect'):
+    elif args.command in ('probe', 'collect', 'weekly'):
+        if args.command == 'weekly' and args.apply:
+            import os
+            if not os.environ.get('SCOUTING_DATABASE_URL') or os.environ.get('DB_SCHEMA') != 'scouting':
+                parser.error('weekly --apply requires SCOUTING_DATABASE_URL and DB_SCHEMA=scouting')
         client = sync.Http(budget=1 if args.command == 'probe' else args.max_requests,
                            seconds=min(args.seconds, 40) if args.command == 'probe' else args.seconds,
                            profile=args.http_profile)
         try:
             if args.command == 'probe':
                 result = sync.probe(client.fetch)
+            elif args.command == 'weekly':
+                from scouting.scheduled_sync import run
+                result = run(args.folder, client.fetch, apply=args.apply, lookback_days=args.lookback_days)
             else:
                 state, frame = sync.collect(args.folder, client.fetch, resume=args.resume, lookback_days=args.lookback_days)
                 result = {'validated': True, 'matches': len(state['events']), 'players': len(frame)}
