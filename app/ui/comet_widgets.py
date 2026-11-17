@@ -184,8 +184,9 @@ def show_table(frame: pd.DataFrame, columns: Mapping[str, tuple], *, key: Option
     excel_formats = dict(formats)
     view = values.copy()
     for column in view.columns:
-        if view[column].isna().any():
-            # Streamlit dibuja las celdas vacías como "None"; con texto, un dato ausente se ve como "—".
+        if view[column].isna().any() and not pd.api.types.is_numeric_dtype(view[column]):
+            # Los números conservan su tipo para ordenar; Styler aporta el «—» por separado.
+            # Las columnas de texto sí necesitan sustituir los ausentes en los valores.
             view[column] = [MISSING if pd.isna(v) else _render(v, formats.get(column)) for v in view[column]]
             formats.pop(column, None)
     styler = styled(view, formats)

@@ -73,11 +73,34 @@ def test_a_named_table_offers_the_excel_of_exactly_the_visible_columns(downloads
 def test_missing_values_are_a_dash_on_screen_and_an_empty_cell_in_excel_never_zero(downloads):
     app = run(one_table)
 
-    assert app.dataframe[0].value['Edad'].tolist() == ['15', '—']
+    age = app.dataframe[0].value['Edad']
+    assert pd.api.types.is_numeric_dtype(age)
+    assert age.iloc[0] == 15 and pd.isna(age.iloc[1])
+    # Streamlit receives numeric values for sorting and separate display values for missing cells.
+    import pyarrow as pa
+    displayed = pa.ipc.open_stream(app.dataframe[0].proto.styler.display_values).read_all().to_pandas()
+    assert displayed['Edad'].tolist() == ['15', '—']
     ws = opened(downloads[0])['Prueba']
     assert [ws['B2'].value, ws['B3'].value] == [15, None]
     assert [ws['C2'].value, ws['C3'].value] == [90, 0], 'un 0 verdadero se conserva'
     assert ws['B2'].number_format == '0'
+
+
+def sortable_table():
+    import pandas as pd
+    from ui.comet_widgets import show_table
+    frame = pd.DataFrame({'goals': [10.0, None, 2.0, 0.0]})
+    show_table(frame, {'goals': ('Goles', '{:.0f}')}, name='Orden numerico')
+
+
+def test_missing_numbers_do_not_turn_numeric_sorting_into_alphabetical_sorting(downloads):
+    app = run(sortable_table)
+    goals = app.dataframe[0].value['Goles']
+    assert pd.api.types.is_numeric_dtype(goals)
+    assert goals.sort_values().dropna().tolist() == [0, 2, 10]
+    assert pd.isna(goals.iloc[1])
+    ws = opened(downloads[0])['Orden numerico']
+    assert [ws.cell(row, 1).value for row in range(2, 6)] == [10, None, 2, 0]
 
 
 def without_name():
