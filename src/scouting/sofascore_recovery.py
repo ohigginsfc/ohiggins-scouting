@@ -102,7 +102,7 @@ def validate_event(event, state):
         raise InvalidPackage('Invalid event ID')
     if event.get('season', {}).get('id') != state['season_id']:
         raise InvalidPackage('Event belongs to a different season')
-    if event.get('tournament', {}).get('uniqueTournament', {}).get('id') != 11653:
+    if event.get('tournament', {}).get('uniqueTournament', {}).get('id') != state.get('tournament_id', 11653):
         raise InvalidPackage('Event belongs to a different tournament')
 
 

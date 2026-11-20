@@ -101,13 +101,13 @@ def find_sofascore_candidates_for_player(
     if not scouted:
         return []
 
-    scouted_norm = str(scouted.get("normalized_name") or normalize_player_name(scouted.get("full_name") or ""))
+    scouted_norm = str(scouted.get("normalized_name") or normalize_player_name(scouted.get("full_name") or "")).split(' | sofascore:', 1)[0]
 
     pool = matching_repository.get_sofascore_candidate_pool(conn, exclude_player_id=player_id)
     matched: list[dict[str, Any]] = []
 
     for row in pool:
-        cand_norm = str(row.get("normalized_name") or normalize_player_name(row.get("full_name") or ""))
+        cand_norm = str(row.get("normalized_name") or normalize_player_name(row.get("full_name") or "")).split(' | sofascore:', 1)[0]
         if not _names_match(scouted_norm, cand_norm):
             continue
         if filter_by_team and not _team_match(scouted.get("current_team"), row.get("current_team")):

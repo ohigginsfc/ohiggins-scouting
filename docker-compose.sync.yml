@@ -6,27 +6,44 @@ x-worker: &worker
   volumes:
     - ./data/recovery:/app/data/recovery
   entrypoint: ["python", "scripts/manual_scouting_sync.py"]
+x-weekly: &weekly
+  <<: *worker
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 45s
+  environment: &scouting-database
+    SCOUTING_DATABASE_URL: ${SCOUTING_DATABASE_URL:-}
+    DB_SCHEMA: scouting
+    PYTHONUNBUFFERED: "1"
+  logging:
+    driver: json-file
+    options:
+      max-size: "5m"
+      max-file: "3"
 services:
   collector:
     <<: *worker
   publisher:
     <<: *worker
     profiles: ["publish"]
-    environment: &scouting-database
-      SCOUTING_DATABASE_URL: ${SCOUTING_DATABASE_URL:-}
-      DB_SCHEMA: scouting
+    environment: *scouting-database
   scheduler:
-    <<: *worker
-    profiles: ["scheduler"]
-    restart: unless-stopped
-    init: true
-    stop_grace_period: 45s
+    <<: *weekly
+    profiles: ["scheduler", "leagues"]
     entrypoint: ["python", "scripts/run_scouting_scheduler.py"]
-    environment:
-      <<: *scouting-database
-      PYTHONUNBUFFERED: "1"
-    logging:
-      driver: json-file
-      options:
-        max-size: "5m"
-        max-file: "3"
+  scheduler-primera-b:
+    <<: *weekly
+    profiles: ["primera-b", "leagues"]
+    entrypoint: ["python", "scripts/run_scouting_scheduler.py", "--league", "cl_primera_b"]
+  scheduler-argentina:
+    <<: *weekly
+    profiles: ["leagues"]
+    entrypoint: ["python", "scripts/run_scouting_scheduler.py", "--league", "ar_primera"]
+  scheduler-argentina-nacional:
+    <<: *weekly
+    profiles: ["leagues"]
+    entrypoint: ["python", "scripts/run_scouting_scheduler.py", "--league", "ar_primera_nacional"]
+  scheduler-uruguay:
+    <<: *weekly
+    profiles: ["leagues"]
+    entrypoint: ["python", "scripts/run_scouting_scheduler.py", "--league", "uy_primera"]

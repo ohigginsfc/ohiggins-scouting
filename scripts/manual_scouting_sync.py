@@ -1,4 +1,4 @@
-"""Explicit collect/validate/publish commands for manual Chile 2026 updates."""
+"""Explicit collect/validate/publish commands for verified 2026 league scopes."""
 import argparse
 import json
 import sys
@@ -6,12 +6,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from scouting import manual_sync as sync
+from scouting.sofascore_leagues import DEFAULT_LEAGUE, LEAGUES
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['probe', 'bootstrap', 'collect', 'validate', 'publish', 'weekly'])
-    parser.add_argument('--folder', type=Path, default=Path('data/recovery/manual-2026'))
+    parser.add_argument('--league', choices=list(LEAGUES), default=DEFAULT_LEAGUE.key)
+    parser.add_argument('--folder', type=Path)
     parser.add_argument('--source', type=Path)
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--lookback-days', type=int, default=14)
@@ -20,6 +22,9 @@ def main(argv=None):
     parser.add_argument('--seconds', type=int, default=14400)
     parser.add_argument('--http-profile', default='chrome')
     args = parser.parse_args(argv)
+    league = LEAGUES[args.league]
+    args.folder = args.folder or Path(league.folder)
+    options = {} if league == DEFAULT_LEAGUE else {'league': league}
     if not 1 <= args.lookback_days <= 365:
         parser.error('lookback-days must be 1..365')
     if not 1 <= args.max_requests <= 1200 or not 1 <= args.seconds <= 14400:
@@ -27,7 +32,7 @@ def main(argv=None):
     if args.command == 'bootstrap':
         if not args.source:
             parser.error('bootstrap requires --source')
-        print(json.dumps({'cached_matches': sync.bootstrap(args.source, args.folder)}))
+        print(json.dumps({'cached_matches': sync.bootstrap(args.source, args.folder, **options)}))
     elif args.command in ('probe', 'collect', 'weekly'):
         if args.command == 'weekly' and args.apply:
             import os
@@ -38,12 +43,12 @@ def main(argv=None):
                            profile=args.http_profile)
         try:
             if args.command == 'probe':
-                result = sync.probe(client.fetch)
+                result = sync.probe(client.fetch, **options)
             elif args.command == 'weekly':
                 from scouting.scheduled_sync import run
-                result = run(args.folder, client.fetch, apply=args.apply, lookback_days=args.lookback_days)
+                result = run(args.folder, client.fetch, apply=args.apply, lookback_days=args.lookback_days, **options)
             else:
-                state, frame = sync.collect(args.folder, client.fetch, resume=args.resume, lookback_days=args.lookback_days)
+                state, frame = sync.collect(args.folder, client.fetch, resume=args.resume, lookback_days=args.lookback_days, **options)
                 result = {'validated': True, 'matches': len(state['events']), 'players': len(frame)}
             result.update(requests=client.requests, http_profile=client.profile)
             print(json.dumps(result))
@@ -60,10 +65,10 @@ def main(argv=None):
             client.close()
     elif args.command == 'validate':
         state = sync.read(args.folder / 'candidate.json')
-        frame = sync.validate(state)
+        frame = sync.validate(state, **options)
         print(json.dumps({'validated': True, 'matches': len(state['events']), 'players': len(frame)}))
     else:
-        print(json.dumps(sync.publish(args.folder, apply=args.apply)))
+        print(json.dumps(sync.publish(args.folder, apply=args.apply, **options)))
     return 0
 
 

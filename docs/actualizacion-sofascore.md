@@ -146,6 +146,8 @@ Si EC2 devuelve 403, dejar el cron sin activar y actualizar desde un equipo con 
 
 ## 8. Servicio Docker en segundo plano (recomendado)
 
+Para activar **Chile Primera y Primera B, Argentina Primera y Primera Nacional, y Uruguay Primera**, usar la [activación conjunta de ligas](cobertura-scouting.md#una-sola-activación-para-las-cinco-ligas). El comando de esta sección activa únicamente Chile Primera.
+
 Este servicio sustituye al cron del host. Requiere el checkout actualizado, Docker Compose, el `.env.portal` privado y la caché de 2026 conservada, como se explica arriba.
 Comprobar primero el acceso desde EC2 con `collector probe`. Si hay 403/429, resolverlo antes de activar el servicio.
 Revisar `crontab -l` y desactivar cualquier tarea anterior de Sofascore antes de usar esta opción.

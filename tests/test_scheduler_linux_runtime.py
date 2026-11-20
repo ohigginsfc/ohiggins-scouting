@@ -29,6 +29,7 @@ class ShutdownTests(unittest.TestCase):
             timer.start()
             try:
                 with patch.object(scheduler, 'worker_command', return_value=command), \
+                     patch.object(scheduler, 'SHARED_LOCK', Path(folder) / 'weekly.lock'), \
                      patch.object(scheduler.subprocess, 'Popen', side_effect=start):
                     self.assertEqual(scheduler.execute_worker(Path(folder), stop), 130)
                 self.assertIsNotNone(processes[0].poll())

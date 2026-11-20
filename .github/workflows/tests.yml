@@ -49,7 +49,7 @@ jobs:
           EOF
       - run: python -m pytest -q
       - name: Validate background scheduler Compose
-        run: docker compose -f docker-compose.sync.yml --profile scheduler config --quiet
+        run: docker compose -f docker-compose.sync.yml --profile leagues config --quiet
       - name: Build unified portal
         run: docker build -f docker/Dockerfile.portal -t ohiggins-portal:test .
       - name: Build portal recovery image

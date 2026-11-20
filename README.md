@@ -94,6 +94,8 @@ se conservan; no necesitan una descarga completa cada semana.
 
 ## Requisitos
 
+La [guía de cobertura de scouting](docs/cobertura-scouting.md) describe las ligas 2026 de Chile (Primera y Primera B), Argentina (Primera y Primera Nacional) y Uruguay (Primera), su carga inicial y activación semanal conjunta, la separación de identidades y la medición de espacio antes/después de ampliar ligas. En **Scouting → Datos objetivos**, el selector incluye las nuevas ligas y marca como pendientes las que aún no tienen datos publicados.
+
 - Docker
 - Docker Compose v2
 

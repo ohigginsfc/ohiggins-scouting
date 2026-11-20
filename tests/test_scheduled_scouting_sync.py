@@ -8,6 +8,11 @@ from scouting import scheduled_sync as weekly
 from tests.test_manual_sync import candidate, event, fake_players  # noqa: F401
 
 
+@pytest.fixture(autouse=True)
+def isolated_provider_cooldown(monkeypatch, tmp_path):
+    monkeypatch.setattr(weekly, 'PROVIDER_COOLDOWN', tmp_path / 'provider-cooldown.json')
+
+
 def pipeline(monkeypatch):
     calls = []
 
@@ -107,3 +112,33 @@ def test_complete_but_invalid_checkpoint_is_not_implicitly_replaced(tmp_path, mo
     manual.save(tmp_path / 'candidate.json', state)
     with pytest.raises(ValueError, match='mismatch'):
         weekly.run(tmp_path, lambda _: pytest.fail('invalid checkpoint discarded'))
+
+
+@pytest.mark.parametrize('status', [403, 429])
+def test_provider_block_in_primera_also_stops_primera_b(tmp_path, monkeypatch, status):
+    from scouting.sofascore_leagues import LEAGUES
+    retry_at = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat() if status == 429 else None
+
+    def blocked(*args, **kwargs):
+        raise manual.r.ProviderBlocked(status, retry_at)
+
+    monkeypatch.setattr(manual, 'collect', blocked)
+    with pytest.raises(manual.r.ProviderBlocked):
+        weekly.run(tmp_path / 'first', lambda _: None)
+    monkeypatch.setattr(manual, 'collect', lambda *a, **k: pytest.fail('shared IP cooldown ignored'))
+    with pytest.raises(manual.r.ProviderBlocked):
+        weekly.run(tmp_path / 'second', lambda _: pytest.fail('provider request'), league=LEAGUES['cl_primera_b'])
+    receipt = manual.read(tmp_path / 'second' / 'weekly-summary.json')
+    assert receipt['status'] == 'blocked' and receipt['applied'] is False
+
+
+def test_shorter_local_cooldown_does_not_shorten_the_shared_provider_wait(tmp_path, monkeypatch):
+    short = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    long = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+    manual.save(tmp_path / 'weekly-summary.json', dict(http_status=429, retry_at=short))
+    manual.save(weekly.PROVIDER_COOLDOWN, dict(http_status=429, retry_at=long))
+    monkeypatch.setattr(manual, 'collect', lambda *a, **k: pytest.fail('cooldown ignored'))
+    with pytest.raises(manual.r.ProviderBlocked) as result:
+        weekly.run(tmp_path, lambda _: None)
+    assert result.value.retry_at == long
+    assert manual.read(weekly.PROVIDER_COOLDOWN)['retry_at'] == long
