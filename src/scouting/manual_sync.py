@@ -1,4 +1,4 @@
-"""Manual Chile 2026 collection; no database imports until explicit publication."""
+"""Scoped 2026 league collection; no database imports until explicit publication."""
 from __future__ import annotations
 
 import gzip

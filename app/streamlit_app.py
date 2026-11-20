@@ -33,6 +33,7 @@ from scouting.services import (
 )
 from scouting.config import metric_direction, metric_labels
 from scouting.config.sofascore_seasons import get_active_season, get_historical_season, season_ui_label
+from scouting.sofascore_leagues import LEAGUES
 from scouting.services.templates_service import PRIMARY_POSITIONS_ORDER, get_available_positions
 from scouting.services.reports_service import (
     create_scouting_report_from_dict,
@@ -3415,14 +3416,6 @@ def _render_objective_explorer() -> None:
     has_data = any(
         filt.get(k) for k in ("seasons", "competitions", "teams", "positions")
     )
-    if not has_data:
-        empty_state(
-            "No se encontraron métricas para esta temporada.",
-            "Importa o actualiza datos objetivos para comenzar el análisis.",
-            icon="chart",
-        )
-        return
-
     seasons_raw = filt.get("seasons") or []
     season_labels, season_label_to_raw = metrics_service.season_filter_labels(seasons_raw)
     active_season = get_active_season()
@@ -3430,6 +3423,11 @@ def _render_objective_explorer() -> None:
     default_season_index = 0
     if active_season_label in season_labels:
         default_season_index = season_labels.index(active_season_label)
+    published_competitions = filt.get("competitions") or []
+    competition_options = list(dict.fromkeys(
+        [league.competition for league in LEAGUES.values() if league.season == active_season]
+        + published_competitions
+    ))
 
     section_header(
         "Filtros",
@@ -3452,7 +3450,8 @@ def _render_objective_explorer() -> None:
         )
         comp_sel = r1c.selectbox(
             "Liga / competición",
-            [ALL] + (filt.get("competitions") or []),
+            [ALL] + competition_options,
+            format_func=lambda name: name if name == ALL or name in published_competitions else name + " · pendiente",
             key="obj_simple_competition",
         )
 
@@ -3473,6 +3472,13 @@ def _render_objective_explorer() -> None:
     pos_f = None if pos_sel == ALL else pos_sel
     team_f = None if team_sel == ALL_TEAM else team_sel
     search_f = search.strip() or None
+
+    if comp_f and comp_f not in published_competitions:
+        st.info(f"{comp_f} · {season_f}: datos pendientes de publicación.")
+        return
+    if not has_data:
+        empty_state("No se encontraron métricas para esta temporada.", icon="chart")
+        return
 
     with get_connection() as conn:
         rows = metrics_service.get_objective_players_summary(

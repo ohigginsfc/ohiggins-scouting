@@ -1,4 +1,4 @@
-"""Explicit collect/validate/publish commands for manual Chile 2026 updates."""
+"""Explicit collect/validate/publish commands for verified 2026 league scopes."""
 import argparse
 import json
 import sys

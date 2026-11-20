@@ -92,3 +92,30 @@ def test_legacy_name_matching_cannot_merge_two_distinct_provider_ids(db):
     with db() as conn:
         links = dict(conn.execute("SELECT external_id,player_id FROM player_external_ids WHERE provider='sofascore'").fetchall())
         assert links['1'] != links['2']
+
+
+def test_regional_publications_keep_chile_reports_and_other_league_metrics(db, monkeypatch, tmp_path):
+    setup(db, monkeypatch, tmp_path)
+    protected = records(db)
+    for key in ('ar_primera', 'ar_primera_nacional', 'uy_primera'):
+        league = LEAGUES[key]
+        ev = event()
+        ev['season']['id'] = league.season_id
+        ev['tournament']['uniqueTournament']['id'] = league.tournament_id
+        state = candidate([ev])
+        state.update(league_key=key, tournament_id=league.tournament_id,
+                     season_id=league.season_id, scope=league.scope)
+        folder = tmp_path / key
+        manual.save(folder / 'candidate.json', state)
+        with db() as conn:
+            prior = conn.execute('SELECT * FROM objective_metrics ORDER BY id').fetchall()
+        assert manual.publish(folder, league=league)['dry_run']
+        manual.publish(folder, league=league, apply=True)
+        assert records(db) == protected
+        with db() as conn:
+            assert conn.execute('SELECT * FROM objective_metrics WHERE competition<>%s ORDER BY id',
+                                (league.competition,)).fetchall() == prior
+            assert conn.execute('SELECT count(*) FROM objective_metrics WHERE competition=%s',
+                                (league.competition,)).fetchone()[0] > 0
+            assert conn.execute('SELECT count(*) FROM sofascore_event_ingestion WHERE country=%s AND division=%s',
+                                (league.country,league.division)).fetchone()[0] == 1

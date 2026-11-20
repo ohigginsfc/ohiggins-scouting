@@ -26,4 +26,10 @@ LEAGUES = {league.key: league for league in (
     DEFAULT_LEAGUE,
     League('cl_primera_b', 'cl', 'primera_b', 'Primera B Chile', '2026',
            1240, 89007, 'data/recovery/cl-primera-b-2026', 7),
+    League('ar_primera', 'ar', 'primera', 'Primera División Argentina', '2026',
+           155, 87913, 'data/recovery/ar-primera-2026', 8),
+    League('ar_primera_nacional', 'ar', 'primera_nacional', 'Primera Nacional Argentina', '2026',
+           703, 87940, 'data/recovery/ar-primera-nacional-2026', 9),
+    League('uy_primera', 'uy', 'primera', 'Primera División Uruguay', '2026',
+           278, 89288, 'data/recovery/uy-primera-2026', 10),
 )}

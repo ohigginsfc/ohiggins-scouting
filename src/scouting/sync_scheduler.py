@@ -1,4 +1,4 @@
-"""Persistent Tuesday 06:15 UTC schedule for the isolated Docker worker."""
+"""Persistent, staggered Tuesday schedules for isolated regional Docker workers."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
