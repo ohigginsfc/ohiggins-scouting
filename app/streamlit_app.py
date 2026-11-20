@@ -35,6 +35,8 @@ from scouting.config import metric_direction, metric_labels
 from scouting.config.sofascore_seasons import get_active_season, get_historical_season, season_ui_label
 from scouting.services.templates_service import PRIMARY_POSITIONS_ORDER, get_available_positions
 from scouting.services.reports_service import (
+    PROFILE_FIELD_LABELS,
+    PROFILE_TEXT_MAX_LENGTH,
     create_scouting_report_from_dict,
     delete_report_permanently,
     fetch_hidden_reports,
@@ -42,6 +44,7 @@ from scouting.services.reports_service import (
     fetch_visible_reports,
     hide_report,
     restore_report,
+    update_player_profile,
     update_report_position_and_rating,
     update_report_recommendation,
     update_report,
@@ -669,13 +672,11 @@ def _dashboard_flash_pop() -> None:
                 st.session_state.pop(key, None)
 
 
-NO_PLAYER_POSITION_CHOICE = "Dejar sin posición"
-
-
 def _render_report_quick_update(report: dict[str, Any], report_id: int, *, key_prefix: str = "dashboard") -> None:
-    """«Actualizar informe»: corrige en el momento la posición y la valoración general (petición del 30-10-2026).
+    """«Actualizar informe»: corrige en el momento la posición observada y la valoración general (petición del 30-10-2026).
 
-    La posición de la ficha del jugador solo se completa si hoy no tiene ninguna; la valoración puede quedar sin dato.
+    La posición, el equipo y la nacionalidad **del jugador** no son del informe sino de su ficha: se corrigen en
+    «Actualizar ficha del jugador» (`_render_player_profile_update`). La valoración puede quedar sin dato.
     """
     player_name = report.get("player_full_name") or "el jugador"
     with st.expander("Actualizar informe: posición y valoración", expanded=False):
@@ -687,17 +688,8 @@ def _render_report_quick_update(report: dict[str, Any], report_id: int, *, key_p
             "Posición observada en el partido",
             value=report.get("position_observed") or "",
             key=f"{key_prefix}_pos_obs_{report_id}",
+            help="La que el scout vio en este partido. La posición del jugador (la del campograma) se cambia en «Actualizar ficha del jugador».",
         )
-        fill_player_position: str | None = None
-        if not str(report.get("player_position") or "").strip():
-            choice = st.selectbox(
-                "Posición en la ficha del jugador (hoy no tiene)",
-                [NO_PLAYER_POSITION_CHOICE, *get_available_positions()],
-                key=f"{key_prefix}_player_pos_{report_id}",
-                help="La ficha del jugador es la que usan el campograma y las tablas del dashboard.",
-            )
-            if choice != NO_PLAYER_POSITION_CHOICE:
-                fill_player_position = choice
         has_rating = st.checkbox(
             "Este informe tiene valoración general",
             value=current_rating is not None,
@@ -724,12 +716,142 @@ def _render_report_quick_update(report: dict[str, Any], report_id: int, *, key_p
                         report_id,
                         position_observed=position_observed,
                         rating=new_rating,
-                        player_position=fill_player_position,
                     )
                 st.session_state["dashboard_flash_success"] = f"Informe de {player_name} actualizado."
                 st.rerun()
             except Exception as exc:  # noqa: BLE001
                 st.error(f"No se pudo actualizar: {exc}")
+
+
+NO_POSITION_CHOICE = "Sin posición"
+
+
+def _profile_position_options(current_position: str) -> list[str]:
+    """Posiciones que se pueden elegir para la ficha: «Sin posición» y las del campograma.
+
+    Si la ficha trae otra (texto libre de otra fuente), se añade tal cual para que no se pierda al abrir el formulario.
+    """
+    options = [NO_POSITION_CHOICE, *get_available_positions()]
+    if current_position and current_position not in options:
+        options.append(current_position)
+    return options
+
+
+def _profile_campograma_hint(position: str | None, nationality: str | None) -> str:
+    """En qué campograma (y dónde) sale un jugador con esta posición y nacionalidad; con «—» no se supone nada.
+
+    Se muestra con los datos de la ficha y, tras guardar, con los nuevos: así un error al escribir la nacionalidad
+    («Chilee» cuenta como extranjero) se ve enseguida.
+    """
+    group = nationality_service.nationality_group(nationality)
+    if group is None:
+        if not position:
+            return "Sin posición ni nacionalidad: no sale en ninguno de los dos campogramas."
+        return "Sin nacionalidad: no sale en ninguno de los dos campogramas."
+    where = nationality_service.GROUP_LABELS[group].lower()
+    if not position:
+        return f"Cuenta entre los {where}, pero sin posición no se ubica en el campo."
+    if position not in PITCH_COORDS:
+        return f"Cuenta entre los {where}, pero el campograma no reconoce la posición «{position}»."
+    return f"Sale en el campograma de {where}, como {position}."
+
+
+def _describe_profile_changes(changes: dict[str, tuple[str | None, str | None]]) -> str:
+    """«posición «Portero» → «Delantero»; nacionalidad «—» → «Chile»»: lo que se guardó, con «—» cuando falta el dato."""
+    return "; ".join(
+        f"{PROFILE_FIELD_LABELS[name]} «{before or '—'}» → «{after or '—'}»" for name, (before, after) in changes.items()
+    )
+
+
+def _render_player_profile_update(report: dict[str, Any], report_id: int, *, key_prefix: str = "dashboard") -> None:
+    """«Actualizar ficha del jugador»: corrige posición, equipo de procedencia y nacionalidad (petición de Pablo, 20-11-2026).
+
+    Son datos del jugador, no del informe: los comparten todos sus informes. La posición y la nacionalidad deciden si el
+    jugador sale en el campograma de chilenos o de extranjeros y en qué punto del campo.
+    """
+    player_name = report.get("player_full_name") or "el jugador"
+    current_position = str(report.get("player_position") or "").strip()
+    current_team = str(report.get("player_current_team") or "").strip()
+    current_nationality = str(report.get("player_nationality") or "").strip()
+    position_key = f"{key_prefix}_profile_pos_{report_id}"
+    team_key = f"{key_prefix}_profile_team_{report_id}"
+    nationality_key = f"{key_prefix}_profile_nat_{report_id}"
+    with st.expander("Actualizar ficha del jugador: posición, equipo y nacionalidad", expanded=False):
+        st.caption(
+            f"Ficha de {player_name} hoy: posición {current_position or '—'} · equipo de procedencia "
+            f"{current_team or '—'} · nacionalidad {current_nationality or '—'}. "
+            "Son datos del jugador: se ven igual en todos sus informes y en los campogramas."
+        )
+        st.caption(_profile_campograma_hint(current_position or None, current_nationality or None))
+        options = _profile_position_options(current_position)
+        # Formulario: un solo clic en «Guardar» envía todos los campos a la vez (sin él, el primer clic tras escribir en un
+        # campo de texto solo lo confirmaba y había que pulsar dos veces).
+        with st.form(f"{key_prefix}_profile_form_{report_id}", border=False):
+            choice = st.selectbox(
+                "Posición",
+                options,
+                index=options.index(current_position) if current_position else 0,
+                key=position_key,
+                format_func=lambda option: (
+                    f"{option} (el campograma no la reconoce)"
+                    if option != NO_POSITION_CHOICE and option not in PITCH_COORDS
+                    else option
+                ),
+                help="La posición de la ficha es la que usan el campograma y las tablas por posición.",
+            )
+            team = st.text_input(
+                "Equipo de procedencia",
+                value=current_team,
+                max_chars=PROFILE_TEXT_MAX_LENGTH,
+                key=team_key,
+                placeholder="Equipo en el que juega o del que viene",
+                help="Es el «Equipo actual» de la ficha. Vacío = sin dato.",
+            )
+            nationality = st.text_input(
+                "Nacionalidad",
+                value=current_nationality,
+                max_chars=PROFILE_TEXT_MAX_LENGTH,
+                key=nationality_key,
+                placeholder="Ej. Chile, Argentina o «Chile / Argentina»",
+                help=(
+                    "Decide si el jugador sale en el campograma de chilenos o de extranjeros. Con doble nacionalidad, "
+                    "escribe las dos separadas por «/»: si una es chilena, cuenta como chileno. Vacío = sin dato."
+                ),
+            )
+            submitted = st.form_submit_button(labeled("save", "Guardar ficha del jugador"), type="primary")
+        if not submitted:
+            return
+        # Solo viaja lo que la persona cambió respecto a lo que veía: así no se pisa lo que otra persona haya
+        # corregido entre tanto en un campo que no tocó.
+        new_position = None if choice == NO_POSITION_CHOICE else choice
+        requested: dict[str, str | None] = {}
+        if new_position != (current_position or None):
+            requested["position"] = new_position
+        if team.strip() != current_team:
+            requested["current_team"] = team
+        if nationality.strip() != current_nationality:
+            requested["nationality"] = nationality
+        if not requested:
+            st.info("No hay cambios que guardar.")
+            return
+        try:
+            with get_connection() as conn:
+                saved = update_player_profile(conn, report_id, **requested)
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"No se pudo guardar la ficha: {exc}")
+            return
+        if not saved:
+            st.info("No hay cambios que guardar.")
+            return
+        final_position = saved["position"][1] if "position" in saved else (current_position or None)
+        final_nationality = saved["nationality"][1] if "nationality" in saved else (current_nationality or None)
+        for key in (position_key, team_key, nationality_key):
+            st.session_state.pop(key, None)  # el formulario vuelve a leer lo guardado
+        st.session_state["dashboard_flash_success"] = (
+            f"Ficha de {player_name} actualizada: {_describe_profile_changes(saved)}. "
+            f"{_profile_campograma_hint(final_position, final_nationality)}"
+        )
+        st.rerun()
 
 
 def _render_visible_reports_management(reports: list[dict[str, Any]]) -> None:
@@ -792,6 +914,7 @@ def _render_visible_reports_management(reports: list[dict[str, Any]]) -> None:
             for field, label in [('summary', 'Resumen'), ('strengths', 'Fortalezas'), ('weaknesses', 'Aspectos a mejorar')]:
                 edited_text[field] = st.text_area(label, value=report.get(field) or '', key=f'portal_edit_{report_id}_{field}')
     _render_report_quick_update(report, report_id)
+    _render_player_profile_update(report, report_id)
     portal_scout = False
     if os.environ.get('PORTAL_MODE') == '1':
         from scouting.portal.security import require_user
@@ -970,6 +1093,7 @@ def _render_hidden_reports_page() -> None:
     if readonly_preview():
         return
     _render_report_quick_update(report, report_id, key_prefix='hidden')
+    _render_player_profile_update(report, report_id, key_prefix='hidden')
     with st.form(f'hidden_edit_report_{report_id}'):
         current_rec = report.get('recommendation')
         rec_index = list(RECOMMENDATION_OPTIONS).index(current_rec) if current_rec in RECOMMENDATION_OPTIONS else None
@@ -1285,7 +1409,8 @@ def _render_dashboard() -> None:
         st.caption(
             "Posición: la de la ficha del jugador o, si no tiene, la que el scout observó en el informe. "
             "«—» significa que no hay dato (la valoración general es opcional y no se rellena sola). "
-            "Para corregir un informe, usa «Actualizar informe» en Gestión de informes."
+            "Para corregir un informe, usa «Actualizar informe» en Gestión de informes; para corregir la posición, "
+            "el equipo o la nacionalidad del jugador, «Actualizar ficha del jugador»."
         )
 
     _render_hidden_reports_preview(
@@ -1318,10 +1443,15 @@ def _render_dashboard() -> None:
             )
     no_nationality = counts_by_origin["unknown"]
     if no_nationality:
+        how_to_fix = (
+            "Se asigna al registrar al jugador o en «Gestión de informes» → «Actualizar ficha del jugador»."
+            if not readonly_preview()
+            else "Se asigna al registrar o editar al jugador."
+        )
         st.caption(
             f"{sum(r['players_count'] for r in no_nationality)} jugador(es) con "
             f"{sum(r['reports_count'] for r in no_nationality)} informe(s) no tienen nacionalidad en su ficha: "
-            "no aparecen en ninguno de los dos campogramas. Se asigna al registrar o editar al jugador."
+            f"no aparecen en ninguno de los dos campogramas. {how_to_fix}"
         )
 
     for group, _prefix, _title in PITCH_MAPS:
