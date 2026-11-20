@@ -134,6 +134,8 @@ def test_readonly_hidden_report_ui_has_no_write_controls(cloud_config, monkeypat
     # Solo lectura: el campograma de informes ocultos se puede mirar (tabla por posición y tabla de informes), pero no hay
     # ningún botón (ni «Actualizar informe», ni guardar, ni restaurar) ni cuadros de texto para editar.
     assert len(app.button) == 0 and len(app.text_area) == 0 and len(app.dataframe) == 2
+    # Tampoco el editor de la ficha del jugador (posición, equipo y nacionalidad): ni desplegable ni campos.
+    assert len(app.text_input) == 0 and not [e for e in app.expander if 'Actualizar ficha del jugador' in e.label]
 
 
 def test_readonly_router_omits_creation_and_comet_configuration(cloud_config, monkeypatch):

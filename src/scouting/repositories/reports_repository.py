@@ -23,7 +23,8 @@ _REPORT_LIST_COLS = """
     sr.competition, sr.match_observed, sr.position_observed, sr.minutes_observed,
     sr.summary, sr.strengths, sr.weaknesses, sr.recommendation, sr.rating,
     sr.video_url, sr.raw_payload, sr.is_hidden, sr.hidden_at, sr.hidden_by, sr.created_at,
-    p.full_name AS player_full_name, p.position AS player_position
+    p.full_name AS player_full_name, p.position AS player_position,
+    p.current_team AS player_current_team, p.nationality AS player_nationality
 """
 
 

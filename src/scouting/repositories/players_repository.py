@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from psycopg import Connection
+from psycopg import sql
 from psycopg.errors import UniqueViolation
 from psycopg.rows import dict_row
 
@@ -249,6 +250,42 @@ def set_player_position_if_missing(conn: Connection, player_id: int, position: s
         cur.execute(
             "UPDATE players SET position = %s WHERE id = %s AND (position IS NULL OR trim(position) = '')",
             (position, player_id),
+        )
+        changed = bool(cur.rowcount)
+    if commit:
+        conn.commit()
+    return changed
+
+
+# Columnas de la ficha que una persona puede corregir a mano (posición, equipo de procedencia y nacionalidad).
+EDITABLE_PROFILE_COLUMNS = ("position", "current_team", "nationality")
+
+
+def update_player_profile(
+    conn: Connection,
+    player_id: int,
+    changes: dict[str, str | None],
+    *,
+    commit: bool = True,
+) -> bool:
+    """Corrige columnas de la ficha del jugador, **pisando** el valor que hubiera (a diferencia de los «solo si está vacío»).
+
+    * Solo se aceptan `position`, `current_team` y `nationality`; cualquier otra clave es un error (nunca se arma SQL
+      con nombres que vengan de fuera).
+    * Un valor `None` deja la columna vacía (NULL): el dato desconocido se muestra «—», no se guarda un texto inventado.
+    * Devuelve si la fila existe y se escribió. Con `commit=False` la transacción queda abierta para que quien llama
+      la cierre junto con otras escrituras.
+    """
+    if not changes:
+        return False
+    unknown = set(changes) - set(EDITABLE_PROFILE_COLUMNS)
+    if unknown:
+        raise ValueError(f"Campos de la ficha no válidos: {', '.join(sorted(unknown))}.")
+    assignments = sql.SQL(", ").join(sql.SQL("{} = %s").format(sql.Identifier(name)) for name in changes)
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL("UPDATE players SET {} WHERE id = %s").format(assignments),
+            (*changes.values(), player_id),
         )
         changed = bool(cur.rowcount)
     if commit:
