@@ -505,11 +505,10 @@ def visible_report(dashboard, monkeypatch):
     return dashboard
 
 
-def test_update_report_panel_sends_the_chosen_position_and_rating(visible_report):
+def test_update_report_panel_sends_the_observed_position_and_rating(visible_report):
     app = visible_report(ADMIN)
     assert not app.exception, [e.value for e in app.exception]
     assert app.button(key='dashboard_update_report_7').label.endswith('Actualizar informe')
-    app.selectbox(key='dashboard_player_pos_7').select('Delantero')
     app.text_input(key='dashboard_pos_obs_7').set_value('Extremo izquierdo')
     app.slider(key='dashboard_rating_7').set_value(8.5)
     app.button(key='dashboard_update_report_7').click().run()
@@ -517,7 +516,7 @@ def test_update_report_panel_sends_the_chosen_position_and_rating(visible_report
     visible_report.update.assert_called_once()
     call = visible_report.update.call_args
     assert call.args[1] == 7
-    assert call.kwargs == dict(position_observed='Extremo izquierdo', rating=8.5, player_position='Delantero')
+    assert call.kwargs == dict(position_observed='Extremo izquierdo', rating=8.5)
     assert any('Informe de Jugador Uno actualizado.' in s.value for s in app.success)
 
 
@@ -528,17 +527,20 @@ def test_update_report_panel_can_leave_the_report_without_rating(visible_report)
     assert not app.exception, [e.value for e in app.exception]
     call = visible_report.update.call_args
     assert call.kwargs['rating'] is None, 'sin valoración: nunca un 0 ni un 6 de relleno'
-    assert call.kwargs['player_position'] is None, 'sin elegir posición no se toca la ficha'
+    assert 'player_position' not in call.kwargs, 'la posición del jugador ya no se toca desde «Actualizar informe»'
 
 
-def test_update_report_panel_only_offers_the_ficha_position_when_it_is_missing(dashboard, monkeypatch):
+def test_update_report_panel_leaves_the_ficha_position_to_the_ficha_editor(dashboard, monkeypatch):
+    """La posición de la ficha se corrige en «Actualizar ficha del jugador» (con o sin posición previa), no aquí."""
     import streamlit_app
-    report = recent(id=7, player_position='Portero', rating=None, raw_payload=None, is_hidden=False)
-    monkeypatch.setattr(streamlit_app, 'fetch_visible_reports', lambda conn, limit=50: [report])
-    app = dashboard(ADMIN)
-    assert not app.exception, [e.value for e in app.exception]
-    assert not [s for s in app.selectbox if s.key == 'dashboard_player_pos_7'], 'una posición que ya existe no se pisa'
-    assert app.checkbox(key='dashboard_has_rating_7').value is False, 'un informe sin valoración empieza sin valoración'
+    for ficha_position in (None, 'Portero'):
+        report = recent(id=7, player_position=ficha_position, rating=None, raw_payload=None, is_hidden=False)
+        monkeypatch.setattr(streamlit_app, 'fetch_visible_reports', lambda conn, limit=50, report=report: [report])
+        app = dashboard(ADMIN)
+        assert not app.exception, [e.value for e in app.exception]
+        assert not [s for s in app.selectbox if s.key == 'dashboard_player_pos_7']
+        assert app.selectbox(key='dashboard_profile_pos_7').value == (ficha_position or 'Sin posición')
+        assert app.checkbox(key='dashboard_has_rating_7').value is False, 'un informe sin valoración empieza sin valoración'
 
 
 def test_update_report_panel_reports_a_failure_instead_of_hiding_it(visible_report):
@@ -561,7 +563,191 @@ def test_hidden_page_offers_the_same_update_panel(dashboard, monkeypatch):
     update.assert_called_once()
     assert update.call_args.args[1] == 7
     # El texto vacío viaja tal cual: es el servicio quien lo guarda como «sin posición observada» (probado en test_report_position_rating).
-    assert update.call_args.kwargs == dict(position_observed='', rating=9.0, player_position=None)
+    assert update.call_args.kwargs == dict(position_observed='', rating=9.0)
+
+
+# --- «Actualizar ficha del jugador»: posición, equipo de procedencia y nacionalidad (Pablo, 20-11-2026) --------------------------------------
+
+PROFILE_TITLE = 'Actualizar ficha del jugador: posición, equipo y nacionalidad'
+FICHA = dict(player_position='Delantero', player_current_team='Club de prueba', player_nationality='Argentina')
+
+
+@pytest.fixture
+def profile_editor(dashboard, monkeypatch):
+    import streamlit_app
+    state = dict(report=recent(id=7, raw_payload=None, is_hidden=False, **FICHA))
+    monkeypatch.setattr(streamlit_app, 'fetch_visible_reports', lambda conn, limit=50: [state['report']])
+    update = Mock(return_value={})
+    monkeypatch.setattr(streamlit_app, 'update_player_profile', update)
+    dashboard.update_profile = update
+    dashboard.state = state
+    return dashboard
+
+
+def click_save_profile(app):
+    """El botón de un formulario no tiene clave: se busca por su texto."""
+    next(b for b in app.button if b.label.endswith('Guardar ficha del jugador')).click().run()
+    assert not app.exception, [e.value for e in app.exception]
+
+
+def test_profile_editor_starts_from_the_ficha_and_sends_nothing_when_nothing_changed(profile_editor):
+    app = profile_editor(ADMIN)
+    assert not app.exception, [e.value for e in app.exception]
+    assert PROFILE_TITLE in [e.label for e in app.expander]
+    assert app.selectbox(key='dashboard_profile_pos_7').value == 'Delantero'
+    assert app.text_input(key='dashboard_profile_team_7').value == 'Club de prueba'
+    assert app.text_input(key='dashboard_profile_nat_7').value == 'Argentina'
+    save = [b for b in app.button if b.label.endswith('Guardar ficha del jugador')]
+    assert len(save) == 1 and save[0].form_id, 'es un formulario: un clic en «Guardar» envía todos los campos a la vez'
+    assert 'posición Delantero · equipo de procedencia Club de prueba · nacionalidad Argentina' in captions_of(app)
+    click_save_profile(app)
+    profile_editor.update_profile.assert_not_called()
+    assert any('No hay cambios que guardar.' in i.value for i in app.info)
+
+
+def test_profile_editor_shows_a_dash_where_the_ficha_has_no_data_never_none(profile_editor):
+    profile_editor.state['report'].update(player_position=None, player_current_team=None, player_nationality=None)
+    app = profile_editor(ADMIN)
+    assert not app.exception, [e.value for e in app.exception]
+    assert 'posición — · equipo de procedencia — · nacionalidad —' in captions_of(app)
+    assert app.selectbox(key='dashboard_profile_pos_7').value == 'Sin posición'
+    assert app.text_input(key='dashboard_profile_team_7').value == ''
+    assert app.text_input(key='dashboard_profile_nat_7').value == ''
+    assert 'None' not in captions_of(app)
+
+
+def test_profile_editor_sends_only_the_fields_that_changed(profile_editor):
+    profile_editor.update_profile.return_value = {'nationality': ('Argentina', 'Chile')}
+    app = profile_editor(ADMIN)
+    app.text_input(key='dashboard_profile_nat_7').set_value('Chile')
+    click_save_profile(app)
+    profile_editor.update_profile.assert_called_once()
+    call = profile_editor.update_profile.call_args
+    assert call.args[1] == 7
+    assert call.kwargs == dict(nationality='Chile'), 'lo que la persona no tocó no se manda (no se pisan cambios de otros)'
+    assert any('Ficha de Jugador Uno actualizada: nacionalidad «Argentina» → «Chile». '
+               'Sale en el campograma de jugadores chilenos, como Delantero.' in s.value for s in app.success), \
+        'tras guardar se dice dónde sale ahora el jugador (así se ve un error al escribir la nacionalidad)'
+
+
+def test_profile_editor_can_change_position_team_and_nationality_together(profile_editor):
+    profile_editor.update_profile.return_value = {
+        'position': ('Delantero', 'Portero'), 'current_team': ('Club de prueba', 'Otro club'), 'nationality': ('Argentina', None)}
+    app = profile_editor(ADMIN)
+    app.selectbox(key='dashboard_profile_pos_7').select('Portero')
+    app.text_input(key='dashboard_profile_team_7').set_value('Otro club')
+    app.text_input(key='dashboard_profile_nat_7').set_value('')
+    click_save_profile(app)
+    call = profile_editor.update_profile.call_args
+    assert call.kwargs == dict(position='Portero', current_team='Otro club', nationality='')
+    message = next(s.value for s in app.success if 'Ficha de Jugador Uno actualizada' in s.value)
+    assert 'posición «Delantero» → «Portero»' in message and 'nacionalidad «Argentina» → «—»' in message, 'sin dato se dice «—»'
+    assert message.endswith('Sin nacionalidad: no sale en ninguno de los dos campogramas.')
+    assert 'None' not in message
+
+
+def test_profile_editor_can_leave_the_position_empty(profile_editor):
+    profile_editor.update_profile.return_value = {'position': ('Delantero', None)}
+    app = profile_editor(ADMIN)
+    app.selectbox(key='dashboard_profile_pos_7').select('Sin posición')
+    click_save_profile(app)
+    assert profile_editor.update_profile.call_args.kwargs == dict(position=None)
+
+
+def test_profile_editor_ignores_spaces_that_change_nothing(profile_editor):
+    app = profile_editor(ADMIN)
+    app.text_input(key='dashboard_profile_team_7').set_value('  Club de prueba  ')
+    click_save_profile(app)
+    profile_editor.update_profile.assert_not_called()
+
+
+@pytest.mark.parametrize('ficha, expected', [
+    (dict(player_position='Delantero', player_nationality='Argentina'), 'Sale en el campograma de jugadores extranjeros, como Delantero.'),
+    (dict(player_position='Delantero', player_nationality='Chilena'), 'Sale en el campograma de jugadores chilenos, como Delantero.'),
+    (dict(player_position='Portero', player_nationality='Argentina / Chile'), 'Sale en el campograma de jugadores chilenos, como Portero.'),
+    (dict(player_position='Delantero', player_nationality='Chilee'), 'Sale en el campograma de jugadores extranjeros, como Delantero.'),
+    (dict(player_position='Delantero', player_nationality=None), 'Sin nacionalidad: no sale en ninguno de los dos campogramas.'),
+    (dict(player_position=None, player_nationality=None), 'Sin posición ni nacionalidad: no sale en ninguno de los dos campogramas.'),
+    (dict(player_position=None, player_nationality='Uruguay'), 'Cuenta entre los jugadores extranjeros, pero sin posición no se ubica en el campo.'),
+    (dict(player_position='Libero', player_nationality='Chile'),
+     'Cuenta entre los jugadores chilenos, pero el campograma no reconoce la posición «Libero».'),
+])
+def test_profile_editor_tells_where_the_player_appears_in_the_campogramas(profile_editor, ficha, expected):
+    profile_editor.state['report'].update(ficha)
+    app = profile_editor(ADMIN)
+    assert not app.exception, [e.value for e in app.exception]
+    assert expected in captions_of(app)
+
+
+def test_profile_editor_keeps_a_ficha_position_the_campograma_does_not_know(profile_editor):
+    profile_editor.state['report']['player_position'] = 'Libero'
+    app = profile_editor(ADMIN)
+    assert not app.exception, [e.value for e in app.exception]
+    select = app.selectbox(key='dashboard_profile_pos_7')
+    assert select.value == 'Libero', 'abrir el formulario no cambia ni pierde la posición que ya traía la ficha'
+    assert 'Libero (el campograma no la reconoce)' in select.options
+    assert 'el campograma no reconoce la posición «Libero»' in captions_of(app)
+    click_save_profile(app)
+    profile_editor.update_profile.assert_not_called()
+
+
+def test_profile_editor_reports_a_failure_instead_of_hiding_it(profile_editor):
+    profile_editor.update_profile.side_effect = PermissionError('Solo puedes modificar tus informes visibles o los informes ocultos.')
+    app = profile_editor(ADMIN)
+    app.text_input(key='dashboard_profile_nat_7').set_value('Chile')
+    click_save_profile(app)
+    assert any('No se pudo guardar la ficha: Solo puedes modificar tus informes' in e.value for e in app.error)
+    assert not any('Ficha de Jugador Uno actualizada' in s.value for s in app.success)
+    assert app.text_input(key='dashboard_profile_nat_7').value == 'Chile', 'lo escrito no se pierde si falla el guardado'
+
+
+def test_profile_editor_reads_the_saved_values_again_after_saving(profile_editor):
+    """Tras guardar, el formulario muestra lo que quedó en la ficha (p. ej. sin espacios de más), no lo que se escribió."""
+    def saved(conn, report_id, **changes):
+        profile_editor.state['report'].update(player_current_team='Otro club')
+        return {'current_team': ('Club de prueba', 'Otro club')}
+
+    profile_editor.update_profile.side_effect = saved
+    app = profile_editor(ADMIN)
+    app.text_input(key='dashboard_profile_team_7').set_value('Otro   club ')
+    click_save_profile(app)
+    assert app.text_input(key='dashboard_profile_team_7').value == 'Otro club'
+
+
+def test_scout_sees_the_profile_editor_on_their_own_visible_reports_only(profile_editor):
+    own = recent(id=7, raw_payload={'portal_owner_id': SCOUT['id']}, is_hidden=False, **FICHA)
+    profile_editor.state['report'] = own
+    app = profile_editor(SCOUT)
+    assert not app.exception, [e.value for e in app.exception]
+    assert PROFILE_TITLE in [e.label for e in app.expander]
+    profile_editor.state['report'] = recent(id=7, raw_payload={'portal_owner_id': 'otro-scout'}, is_hidden=False, **FICHA)
+    app = profile_editor(SCOUT)
+    assert not app.exception, [e.value for e in app.exception]
+    assert PROFILE_TITLE not in [e.label for e in app.expander], 'el informe de otro scout no se puede editar'
+    assert any('No tienes informes propios para editar.' in i.value for i in app.info)
+
+
+def test_hidden_page_offers_the_profile_editor_too(dashboard, monkeypatch):
+    import streamlit_app
+    update = Mock(return_value={'nationality': (None, 'Chile')})
+    monkeypatch.setattr(streamlit_app, 'update_player_profile', update)
+    app = dashboard(SCOUT, {'page': 'Informes ocultos'})
+    assert not app.exception, [e.value for e in app.exception]
+    assert PROFILE_TITLE in [e.label for e in app.expander]
+    app.text_input(key='hidden_profile_nat_7').set_value('Chile')
+    click_save_profile(app)
+    update.assert_called_once()
+    assert update.call_args.args[1] == 7
+    assert update.call_args.kwargs == dict(nationality='Chile')
+    assert any('Ficha de Jugador de prueba actualizada: nacionalidad «—» → «Chile». '
+               'Sale en el campograma de jugadores chilenos, como Delantero.' in s.value for s in app.success)
+
+
+@pytest.mark.parametrize('user', [ADMIN, SCOUT])
+def test_dashboard_tells_how_to_complete_the_missing_nationalities(dashboard, user):
+    app = dashboard(user)
+    assert not app.exception, [e.value for e in app.exception]
+    assert '«Gestión de informes» → «Actualizar ficha del jugador»' in captions_of(app)
 
 
 # --- Informes ocultos por posición en PostgreSQL ------------------------------------------------------------------------------------------

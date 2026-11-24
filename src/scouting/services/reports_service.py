@@ -166,6 +166,94 @@ def update_report_position_and_rating(
     conn.commit()
 
 
+PROFILE_TEXT_MAX_LENGTH = 80
+PROFILE_FIELD_LABELS = {
+    "position": "posición",
+    "current_team": "equipo de procedencia",
+    "nationality": "nacionalidad",
+}
+# Lo que se ve en pantalla cuando falta un dato («—») o se escribe «sin dato»: en la base se guarda vacío (NULL), no ese texto.
+_PROFILE_PLACEHOLDERS = frozenset({"-", "—", "–", "n/a", "na", "sin dato", "sin datos"})
+_UNSET: Any = object()
+
+
+def clean_profile_text(value: Any, *, label: str) -> str | None:
+    """Texto libre de la ficha (equipo, nacionalidad): sin caracteres de control, con espacios colapsados.
+
+    Vacío, o un marcador de «sin dato» como «—», devuelve `None` (la ficha queda sin dato, no con un texto inventado).
+    Un texto demasiado largo se rechaza en vez de recortarlo en silencio.
+    """
+    if value is None:
+        return None
+    text = " ".join("".join(ch if ch.isprintable() else " " for ch in str(value)).split())
+    if not text or text.casefold() in _PROFILE_PLACEHOLDERS:
+        return None
+    if len(text) > PROFILE_TEXT_MAX_LENGTH:
+        raise ValueError(f"{label.capitalize()}: máximo {PROFILE_TEXT_MAX_LENGTH} caracteres.")
+    return text
+
+
+def update_player_profile(
+    conn: Connection,
+    report_id: int,
+    *,
+    position: str | None = _UNSET,
+    current_team: str | None = _UNSET,
+    nationality: str | None = _UNSET,
+) -> dict[str, tuple[str | None, str | None]]:
+    """Corrige la ficha del jugador de un informe: posición, equipo de procedencia y nacionalidad (petición de Pablo, 20-11-2026).
+
+    * Solo se toca lo que se pasa: un campo que no se indica no se lee ni se escribe (así no se pisa lo que otra persona
+      haya cambiado entre tanto); pasar `None` o texto vacío lo deja **sin dato** (NULL).
+    * Es un cambio de verdad: **pisa** el valor que hubiera, a diferencia de los rellenos automáticos («solo si está vacío»).
+    * La posición debe ser una del campograma; si la ficha ya traía otra distinta, se acepta dejarla tal cual (solo se
+      valida lo que cambia). Equipo y nacionalidad son texto libre (ver `clean_profile_text`).
+    * La nacionalidad decide en qué campograma sale el jugador (chilenos o extranjeros); la posición, dónde sale.
+    * Permisos: los mismos que editar el informe (Admin, cualquiera; Scout, sus informes visibles y los ocultos); en el
+      piloto de solo lectura no se puede.
+    Todo se valida antes de escribir y se escribe en una sola sentencia. Devuelve `{campo: (antes, después)}` solo de lo
+    que cambió de verdad (vacío si no había nada que cambiar); quien llama lo usa para decir qué se guardó.
+    """
+    from scouting.services.templates_service import get_available_positions
+
+    if os.environ.get('PORTAL_MODE') == '1':
+        report = require_report_owner(conn, report_id)
+    else:
+        report = reports_repository.get_report_by_id(conn, report_id)
+    if not report:
+        raise ValueError("Informe no encontrado.")
+
+    current = {
+        "position": report.get("player_position"),
+        "current_team": report.get("player_current_team"),
+        "nationality": report.get("player_nationality"),
+    }
+    requested = {"position": position, "current_team": current_team, "nationality": nationality}
+    changes: dict[str, str | None] = {}
+    for name, raw in requested.items():
+        if raw is _UNSET:
+            continue
+        label = PROFILE_FIELD_LABELS[name]
+        new_value = _optional_str(raw) if name == "position" else clean_profile_text(raw, label=label)
+        old_value = _optional_str(current[name])
+        if new_value == old_value:
+            continue
+        if name == "position" and new_value is not None and new_value not in get_available_positions():
+            raise ValueError(f"Posición no válida: {new_value!r}")
+        changes[name] = new_value
+    if not changes:
+        return {}
+
+    try:
+        if not players_repository.update_player_profile(conn, int(report["player_id"]), changes, commit=False):
+            raise ValueError("Jugador no encontrado.")
+    except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
+    return {name: (_optional_str(current[name]), value) for name, value in changes.items()}
+
+
 def _to_date(value: Any) -> date | None:
     if value is None:
         return None

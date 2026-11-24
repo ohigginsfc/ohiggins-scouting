@@ -7,7 +7,7 @@ import streamlit as st
 from ui.theme import inject_ohiggins_theme
 
 # Incrementar al publicar una nueva versión del portal.
-PORTAL_VERSION = '1.2.0'
+PORTAL_VERSION = '1.3.0'
 
 
 def crest():
@@ -57,10 +57,12 @@ def inject_portal_brand():
     .st-key-portal_module label:has(input:checked) {background:#e0f0fc;border-color:#4f8fcc;}
     button[kind="primary"] {background:#286c99!important;border-color:#286c99!important;color:white!important;}
     button[kind="primary"]:hover {background:#1b537b!important;border-color:#1b537b!important;}
+    button[kind="primaryFormSubmit"] {background:#286c99!important;border-color:#286c99!important;color:white!important;}
+    button[kind="primaryFormSubmit"]:hover {background:#1b537b!important;border-color:#1b537b!important;}
     button:focus-visible, input:focus-visible {outline:3px solid #75b9e5!important;outline-offset:2px;}
     .stApp [class*="st-key-nav_"] button[kind="primary"] {background:#286c99!important;border-color:#286c99!important;}
     .stApp [class*="st-key-nav_"] button[kind="primary"] p {color:#fff!important;}
-    button[kind="primary"] p {color:white!important;}
+    button[kind="primary"] p, button[kind="primaryFormSubmit"] p {color:white!important;}
     [data-testid="stCaptionContainer"] p {color:#496477!important;}
     [data-testid="stWidgetLabel"] p {color:#294b65!important;}
     input::placeholder {color:#496477!important;opacity:1!important;}

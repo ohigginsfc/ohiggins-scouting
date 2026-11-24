@@ -193,10 +193,11 @@ debe decidirla y ejecutarla quien administra la base de datos; este cambio no la
 *La petición decía «un botón para actualizar el informe haciendo clic en el momento». Puede significar dos cosas y se cubrieron las dos:*
 
 * **«Actualizar»** (sobre la tabla de «Actividad reciente»): vuelve a leer los informes de la base de datos al instante.
-* **«Actualizar informe»** (en «Gestión de informes» y en la página «Informes ocultos»): corrige en el momento la **posición observada**, la
-  **valoración general** (de 0 a 10, o «sin valoración») y, **solo si la ficha del jugador no tiene posición**, esa posición (la usan el
-  campograma y las tablas por posición). Nunca pisa una posición que ya existe. Valida todo antes de guardar: o se guarda todo o nada.
+* **«Actualizar informe»** (en «Gestión de informes» y en la página «Informes ocultos»): corrige en el momento la **posición observada** y la
+  **valoración general** (de 0 a 10, o «sin valoración»). Valida todo antes de guardar: o se guarda todo o nada.
   Permisos: los mismos que editar un informe (el Scout, sus informes visibles y cualquier oculto; el Admin, todos). En el piloto de solo lectura no aparece.
+  *(Hasta el 19-11-2026 también completaba la posición de la ficha del jugador si estaba vacía; eso pasó a «Actualizar ficha del jugador», que
+  además puede cambiar una posición que ya existe: ver [Ficha del jugador editable](#ficha-del-jugador-editable-en-gestión-de-informes-20-11-2026).)*
 
 ### Campograma de los informes ocultos
 
@@ -235,6 +236,72 @@ hay un campograma como los demás, con los **informes ocultos por posición**, y
 * El aspecto con datos reales: se revisó en el navegador (campograma de ocultos con su filtro, «Actualizar informe», lista de jugadores con
   equipo, Historial de equipos y las tablas de informes), pero **solo con datos ficticios**, sin base de datos. Esa revisión encontró que la
   valoración vacía se veía «None» en las tablas y se corrigió. Las pruebas automáticas (AppTest) comprueban contenido y comportamiento.
+
+## Ficha del jugador editable en «Gestión de informes» (20-11-2026)
+
+Pedido de Pablo: poder **cambiar la posición, el equipo de procedencia y la nacionalidad** de un jugador desde la parte de Scouting de
+«Gestión de informes». La nacionalidad decide si el jugador sale en el campograma de chilenos o en el de extranjeros; hasta ahora solo se
+podía dar al registrar al jugador y no se podía corregir, y los jugadores sin nacionalidad quedaban fuera de los dos campogramas.
+**No hay migraciones ni cambios de esquema**: solo código de la aplicación.
+
+**Dónde está.** Debajo de «Actualizar informe: posición y valoración» hay un desplegable nuevo, **«Actualizar ficha del jugador: posición, equipo y
+nacionalidad»**, en «Gestión de informes» (Dashboard) y en la página «Informes ocultos». Muestra los datos de hoy (con «—» si falta alguno), dice
+en qué campograma sale el jugador con esos datos y tiene un formulario con tres campos y el botón «Guardar ficha del jugador»:
+
+| Campo | Qué acepta | Al guardar |
+|---|---|---|
+| Posición | Una de las 11 del campograma o «Sin posición». Si la ficha ya traía otra (texto libre de otra fuente), sale marcada «el campograma no la reconoce» y se puede dejar como está | Pisa la que hubiera |
+| Equipo de procedencia | Texto libre, hasta 80 caracteres | Pisa el equipo que hubiera (es el campo «Equipo actual» de la ficha) |
+| Nacionalidad | Texto libre, hasta 80 caracteres; doble nacionalidad: «Chile / Argentina» | Pisa la que hubiera; decide el campograma (reglas en «Dashboard de Scouting…», arriba) |
+
+* **Es un dato del jugador, no del informe**: el cambio se ve en todos sus informes, en los campogramas y en «Consultar jugador».
+* **Vacío = sin dato.** Un campo vacío (o «—», «sin dato», «N/A») se guarda como vacío (NULL) en la base de datos, nunca como un texto inventado ni como 0.
+* **Solo se guarda lo que se cambió.** La pantalla manda solo los campos que la persona modificó y el servicio descarta los que ya tienen ese valor:
+  si dos personas abren la misma ficha y cada una cambia un campo distinto, no se pisan.
+* **Se valida antes de escribir**: una posición fuera de la lista (solo si cambia), un texto de más de 80 caracteres o un informe/jugador que ya no existe →
+  no se guarda nada y se explica por qué. Los espacios y caracteres de control de sobra se quitan. Los campos cambiados se escriben en una sola
+  sentencia y una sola transacción: o se guarda todo o nada.
+* **Al guardar**, el Dashboard se recalcula (cambian los campogramas y el aviso de «jugadores sin nacionalidad») y el mensaje dice qué cambió y
+  dónde sale ahora el jugador: «nacionalidad «—» → «Chile». Sale en el campograma de jugadores chilenos, como Delantero.». Así un error al
+  escribir (p. ej. «Chilee» cuenta como extranjero) se ve enseguida.
+* **Permisos**: los mismos que editar el informe. El Admin, en cualquier informe; el Scout, en sus informes visibles y en cualquier informe oculto
+  (con ellos, en la ficha del jugador de ese informe). En el piloto de solo lectura no aparece y el servicio también lo rechaza.
+* **No lo pisan las importaciones**: Sofascore y el alta manual de informes solo completan datos vacíos de la ficha, así que lo corregido a mano se
+  conserva (una prueba contra PostgreSQL lo comprueba). *Matiz: si se deja un campo vacío a propósito, una importación posterior puede volver a rellenarlo.*
+
+**Otros cambios que van con esto**
+
+* «Actualizar informe» ya no tiene el selector «Posición en la ficha del jugador (hoy no tiene)»: eso se hace ahora desde la ficha, que además puede
+  **cambiar** una posición existente. El servicio conserva esa opción, pero la pantalla ya no la usa.
+* Los botones principales de los formularios («Guardar ficha del jugador», y también «Guardar cambios» en «Informes ocultos») salían en el rojo por
+  defecto de Streamlit en vez del azul del portal; ahora usan el azul (`button[kind="primaryFormSubmit"]` en `app/ui/portal_brand.py`).
+* Versión del portal: `v1.2.0` → **`v1.3.0`** (se ve abajo a la derecha; sirve para comprobar que el servidor ya tiene esta versión).
+
+**Límites conocidos** (a propósito, para no inventar reglas)
+
+* **Sin historial**: no se guarda quién cambió un dato, cuándo ni el valor anterior (la tabla `players` no tiene columnas de auditoría y este cambio
+  no hace migraciones). El mensaje tras guardar sí muestra el valor anterior y el nuevo. Si dos personas cambian **el mismo** campo a la vez, gana quien guarda último.
+* **Solo se llega a jugadores de los 50 informes visibles más recientes** (el límite que ya tenía «Gestión de informes»; en «Informes ocultos», los 200
+  más recientes) y, para un Scout, solo a los de sus propios informes. Un jugador cuyos informes son más antiguos no aparece en la lista.
+* La nacionalidad sigue siendo texto libre: un error de escritura cambia el grupo del jugador (el mensaje tras guardar lo muestra).
+* El mensaje de confirmación sale arriba del Dashboard, como las demás confirmaciones; el desplegable se cierra al guardar.
+
+### Preguntas para Pablo (ficha del jugador)
+
+1. **«Equipo de procedencia»:** se tomó como el club en el que juega ahora el jugador (lo que la ficha llama «Equipo actual»). ¿Es eso, o quieren el club del
+   que viene / en el que se formó? Si es lo segundo, hace falta un campo nuevo.
+2. **¿Quién puede cambiar estos datos?** Hoy, quien puede editar el informe (administración, y cada scout en sus informes y en los ocultos). ¿Prefieren que la
+   nacionalidad solo la cambie administración?
+3. **¿Quieren saber quién cambió un dato y cuándo?** Hoy no se guarda ese historial; habría que crearlo.
+4. **Nacionalidad:** ¿basta con escribirla, o prefieren elegirla de una lista de países para evitar errores de escritura?
+5. **¿Necesitan llegar a jugadores con informes antiguos** (más allá de los 50 más recientes)? Se podría añadir un buscador por nombre.
+
+### Lo que no se pudo comprobar (ficha del jugador)
+
+* Con datos reales: cuántos jugadores no tienen nacionalidad, posición o equipo, y cómo están escritas las nacionalidades que ya existen.
+* El aspecto y el flujo se revisaron en el navegador contra una base PostgreSQL local desechable con datos **ficticios** (sin tocar Supabase ni producción); no con
+  la base real ni con el login real (se usó una sesión de prueba). Las pruebas automáticas cubren la pantalla (AppTest) y el servicio contra PostgreSQL
+  (pisar, vaciar, solo lo cambiado, transacción, permisos y cambio de campograma).
 
 ## Procedencia de COMET
 
